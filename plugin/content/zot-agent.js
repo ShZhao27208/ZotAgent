@@ -844,21 +844,44 @@
         return this.renderStatus("无法访问阅读器视图，请确认 PDF 已加载完成", true);
       }
       const iframeDoc = iframeWin.document;
-      const viewContainer = iframeDoc.querySelector("#viewerContainer") || iframeDoc.body;
       this._capturingImage = true;
       this.captureTarget = null;
 
+      const previousLayerVisibility = this.controller.layer?.style.visibility || "";
+      if (this.controller.layer) this.controller.layer.style.visibility = "hidden";
+
       const overlay = iframeDoc.createElement("div");
-      overlay.style.cssText = "position:fixed;inset:0;z-index:999999;cursor:crosshair;background:rgba(0,0,0,0.08);";
+      overlay.style.cssText = "position:fixed;inset:0;z-index:2147483646;cursor:crosshair;background:rgba(0,0,0,0.08);user-select:none;-moz-user-select:none;";
       const rect = iframeDoc.createElement("div");
       rect.style.cssText = "position:fixed;border:2px dashed #2368a2;background:rgba(35,104,162,0.12);display:none;";
       overlay.appendChild(rect);
-      viewContainer.appendChild(overlay);
+      (iframeDoc.body || iframeDoc.documentElement).appendChild(overlay);
+
+      const previousUserSelect = iframeDoc.documentElement.style.userSelect;
+      const previousMozUserSelect = iframeDoc.documentElement.style.MozUserSelect;
+      iframeDoc.documentElement.style.userSelect = "none";
+      iframeDoc.documentElement.style.MozUserSelect = "none";
 
       let startX = 0, startY = 0, dragging = false;
+      const cleanup = () => {
+        overlay.remove();
+        iframeWin.removeEventListener("pointerdown", blockSelection, true);
+        iframeWin.removeEventListener("pointermove", blockSelection, true);
+        iframeWin.removeEventListener("pointerup", blockSelection, true);
+        iframeWin.removeEventListener("keydown", onEsc, true);
+        iframeDoc.documentElement.style.userSelect = previousUserSelect;
+        iframeDoc.documentElement.style.MozUserSelect = previousMozUserSelect;
+        if (this.controller.layer) this.controller.layer.style.visibility = previousLayerVisibility;
+        this._capturingImage = false;
+        this._captureCleanup = null;
+      };
+      const blockSelection = (e) => {
+        e.preventDefault();
+      };
       const onDown = (e) => {
         e.preventDefault();
         e.stopPropagation();
+        overlay.setPointerCapture?.(e.pointerId);
         startX = e.clientX;
         startY = e.clientY;
         dragging = true;
@@ -882,23 +905,31 @@
         e.preventDefault();
         e.stopPropagation();
         dragging = false;
-        overlay.remove();
-        this._capturingImage = false;
         const x = Math.min(e.clientX, startX);
         const y = Math.min(e.clientY, startY);
         const w = Math.abs(e.clientX - startX);
         const h = Math.abs(e.clientY - startY);
+        cleanup();
         if (w < 10 || h < 10) return;
         this.captureRegion(iframeWin, x, y, w, h);
       };
       const onEsc = (e) => {
-        if (e.key === "Escape") { overlay.remove(); this._capturingImage = false; }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          cleanup();
+          this.renderStatus("已取消截图");
+        }
       };
       overlay.addEventListener("pointerdown", onDown);
       overlay.addEventListener("pointermove", onMove);
       overlay.addEventListener("pointerup", onUp);
-      iframeDoc.addEventListener("keydown", onEsc, { once: true });
+      iframeWin.addEventListener("pointerdown", blockSelection, true);
+      iframeWin.addEventListener("pointermove", blockSelection, true);
+      iframeWin.addEventListener("pointerup", blockSelection, true);
+      iframeWin.addEventListener("keydown", onEsc, true);
       overlay.addEventListener("selectstart", (event) => event.preventDefault());
+      this._captureCleanup = cleanup;
       this.renderStatus("框选 PDF 区域后松开鼠标完成截图");
     }
 
@@ -993,6 +1024,7 @@
         this.renderStatus("截图完成，发送时将作为图像上下文");
       } catch (error) {
         this._capturingImage = false;
+        this._captureCleanup?.();
         this.renderStatus("截图失败: " + error.message, true);
       }
     }
@@ -1554,6 +1586,7 @@
 
     destroy() {
       if (this.requestID) this.runtime.cancel(this.requestID);
+      this._captureCleanup?.();
       if (this._ptyID) this.closePty();
       this.element.remove();
       this.controller.dialogs.delete(this.id);
@@ -1694,6 +1727,10 @@
       const modList = modifiers.split(",").map((m) => m.trim().toLowerCase());
 
       this._shortcutHandler = (event) => {
+        if (event.defaultPrevented) return;
+        const target = event.target;
+        const editable = target?.isContentEditable || /^(input|textarea|select)$/i.test(target?.localName || target?.tagName || "");
+        if (editable) return;
         const pressedKey = event.key.toUpperCase();
         if (pressedKey !== key.toUpperCase()) return;
         const needCtrl = modList.includes("accel") || modList.includes("control");
@@ -1704,7 +1741,6 @@
         const altOk = needAlt ? event.altKey : !event.altKey;
         if (ctrlOk && shiftOk && altOk) {
           event.preventDefault();
-          event.stopPropagation();
           this.toggleDialog();
         }
       };
