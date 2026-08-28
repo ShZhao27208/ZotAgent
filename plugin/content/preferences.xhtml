@@ -1,0 +1,267 @@
+<vbox
+  id="zotagent-preferences"
+  xmlns:html="http://www.w3.org/1999/xhtml"
+  onload="Zotero.ZotAgentPrefs.load(window)"
+>
+  <html:style>
+    #zotagent-preferences { padding: 12px; max-width: 820px; color: var(--fill-primary, #202124); }
+    #zotagent-preferences groupbox {
+      margin-bottom: 12px;
+      padding: 12px 14px 14px;
+      border: 1px solid var(--fill-quinary, #d8dadd);
+      border-radius: 6px;
+      background: var(--material-background, #fff);
+    }
+    #zotagent-preferences h2 { margin: 0; font-size: 15px; letter-spacing: 0; }
+    #zotagent-preferences .zotagent-pref-grid {
+      display: grid;
+      grid-template-columns: 150px minmax(280px, 1fr);
+      gap: 10px 14px;
+      align-items: center;
+      width: 100%;
+    }
+    #zotagent-preferences html\:input,
+    #zotagent-preferences html\:select {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 30px;
+      padding: 4px 7px;
+      border: 1px solid var(--fill-quinary, #bfc3c8);
+      border-radius: 4px;
+      background: var(--material-background, #fff);
+      color: inherit;
+    }
+    #zotagent-runtime-result {
+      min-height: 20px;
+      margin: 10px 0 0;
+      padding: 9px 10px;
+      white-space: pre-wrap;
+      border-radius: 4px;
+      background: var(--material-sidepane, #f4f5f6);
+      color: var(--fill-secondary, #5f6368);
+    }
+    #zotagent-preferences .zotagent-help { margin: 0 0 10px; font-size: 12px; color: var(--fill-secondary, #666); }
+    #zotagent-preferences .zotagent-actions { margin-top: 10px; gap: 7px; }
+
+    #zotagent-preferences {
+      --za-bg: #0b1016;
+      --za-panel: #111922;
+      --za-panel-raised: #16212c;
+      --za-line: #263542;
+      --za-line-strong: #355063;
+      --za-text: #e6edf3;
+      --za-muted: #8293a3;
+      --za-cyan: #32d6c5;
+      --za-blue: #4b9cff;
+      --za-amber: #f5b942;
+      color-scheme: dark;
+      color: var(--za-text);
+      background: var(--za-bg);
+      font-family: Inter, "Segoe UI", system-ui, sans-serif;
+    }
+    #zotagent-preferences groupbox {
+      position: relative;
+      border-color: var(--za-line);
+      background: var(--za-panel);
+      box-shadow: inset 2px 0 0 var(--za-cyan), 0 8px 22px rgb(0 0 0 / 16%);
+    }
+    #zotagent-preferences groupbox:nth-of-type(2) { box-shadow: inset 2px 0 0 var(--za-blue), 0 8px 22px rgb(0 0 0 / 16%); }
+    #zotagent-preferences groupbox:nth-of-type(3) { box-shadow: inset 2px 0 0 var(--za-amber), 0 8px 22px rgb(0 0 0 / 16%); }
+    #zotagent-preferences h2 { color: #f3f8fb; }
+    #zotagent-preferences .zotagent-help { color: var(--za-muted); }
+    #zotagent-preferences html\:label { color: #adbdca; }
+    #zotagent-preferences html\:input,
+    #zotagent-preferences html\:select {
+      color: var(--za-text);
+      background: #090f14;
+      border-color: var(--za-line);
+      caret-color: var(--za-cyan);
+    }
+    #zotagent-preferences html\:input:focus,
+    #zotagent-preferences html\:select:focus {
+      outline: 2px solid rgb(50 214 197 / 18%);
+      border-color: var(--za-cyan);
+    }
+    #zotagent-runtime-result,
+    #zotagent-agent-result {
+      color: #bcd0dd !important;
+      background: #090f14 !important;
+      border: 1px solid var(--za-line);
+      border-radius: 4px !important;
+      font-family: "Cascadia Code", Consolas, monospace;
+    }
+    #zotagent-preferences button {
+      min-height: 30px;
+      padding: 0 12px;
+      color: #c9d6df;
+      background: var(--za-panel-raised);
+      border: 1px solid var(--za-line-strong);
+      border-radius: 4px;
+    }
+    #zotagent-preferences button:hover {
+      color: #fff;
+      background: #1d2c38;
+      border-color: var(--za-cyan);
+    }
+    #zotagent-start-runtime {
+      color: #061314 !important;
+      background: var(--za-cyan) !important;
+      border-color: var(--za-cyan) !important;
+      font-weight: 700;
+    }
+    #zotagent-preferences checkbox { color: #c9d6df; margin: 4px 0 12px; }
+
+    /* Luminous lab settings theme */
+    #zotagent-preferences {
+      --za-bg: #f3f7fa;
+      --za-panel: #ffffff;
+      --za-panel-raised: #edf4f8;
+      --za-line: #d5e1e8;
+      --za-line-strong: #a9c0ce;
+      --za-text: #173042;
+      --za-muted: #687f8f;
+      --za-cyan: #159f91;
+      --za-blue: #2879d0;
+      --za-amber: #c98516;
+      color-scheme: light;
+      color: var(--za-text);
+      background: var(--za-bg);
+    }
+    #zotagent-preferences groupbox {
+      border-color: var(--za-line);
+      background: #ffffff;
+      box-shadow: inset 2px 0 0 var(--za-cyan), 0 8px 22px rgb(45 83 106 / 7%);
+    }
+    #zotagent-preferences groupbox:nth-of-type(2) { box-shadow: inset 2px 0 0 var(--za-blue), 0 8px 22px rgb(45 83 106 / 7%); }
+    #zotagent-preferences groupbox:nth-of-type(3) { box-shadow: inset 2px 0 0 var(--za-amber), 0 8px 22px rgb(45 83 106 / 7%); }
+    #zotagent-preferences h2 { color: #173042; }
+    #zotagent-preferences .zotagent-help { color: var(--za-muted); }
+    #zotagent-preferences html\:label { color: #486170; }
+    #zotagent-preferences html\:input,
+    #zotagent-preferences html\:select {
+      color: var(--za-text);
+      background: #f9fcfd;
+      border-color: var(--za-line);
+      caret-color: var(--za-cyan);
+    }
+    #zotagent-runtime-result,
+    #zotagent-agent-result {
+      color: #385566 !important;
+      background: #f3f8fa !important;
+      border-color: var(--za-line);
+    }
+    #zotagent-preferences button {
+      color: #385566;
+      background: #ffffff;
+      border-color: var(--za-line-strong);
+    }
+    #zotagent-preferences button:hover {
+      color: #173042;
+      background: #eaf3f7;
+      border-color: var(--za-cyan);
+    }
+    #zotagent-start-runtime {
+      color: #ffffff !important;
+      background: var(--za-cyan) !important;
+      border-color: var(--za-cyan) !important;
+    }
+    #zotagent-preferences checkbox { color: #385566; }
+  </html:style>
+
+  <groupbox>
+    <label><html:h2>Runtime</html:h2></label>
+    <html:p class="zotagent-help">插件会在首次启动时生成安全 Token，并自动通过 WSL 启动 Runtime。自动启动失败时仍可手动启动。</html:p>
+    <checkbox
+      id="zotagent-auto-start-runtime"
+      label="启动 Zotero 时自动启动并连接 Runtime"
+      data-pref="autoStartRuntime"
+    />
+    <html:div class="zotagent-pref-grid">
+      <html:label for="zotagent-runtime-endpoint">Endpoint</html:label>
+      <html:input id="zotagent-runtime-endpoint" data-pref="runtimeEndpoint" />
+      <html:label for="zotagent-runtime-token">Token</html:label>
+      <html:input id="zotagent-runtime-token" data-pref="runtimeToken" type="password" />
+      <html:label for="zotagent-runtime-script">Runtime 脚本</html:label>
+      <html:input id="zotagent-runtime-script" data-pref="runtimeScriptPath" />
+      <html:label for="zotagent-runtime-node">WSL Node.js</html:label>
+      <html:input id="zotagent-runtime-node" data-pref="runtimeNodePath" />
+      <html:label for="zotagent-wsl-distro">WSL 发行版</html:label>
+      <html:input id="zotagent-wsl-distro" data-pref="wslDistro" />
+      <html:label for="zotagent-working-directory">默认工作目录</html:label>
+      <html:input id="zotagent-working-directory" data-pref="defaultWorkingDirectory" />
+    </html:div>
+    <hbox class="zotagent-actions">
+      <button id="zotagent-start-runtime" label="立即启动" />
+      <button id="zotagent-test-runtime" label="检测连接" />
+    </hbox>
+    <html:pre id="zotagent-runtime-result"></html:pre>
+  </groupbox>
+
+  <groupbox>
+    <label><html:h2>Agent 命令</html:h2></label>
+    <html:div class="zotagent-pref-grid">
+      <html:label for="zotagent-opencode-path">OpenCode</html:label>
+      <html:input id="zotagent-opencode-path" data-pref="opencodePath" />
+      <html:label for="zotagent-opencode-platform">OpenCode 平台</html:label>
+      <html:select id="zotagent-opencode-platform" data-pref="opencodePlatform">
+        <html:option value="wsl">WSL (Linux)</html:option>
+        <html:option value="windows">Windows</html:option>
+      </html:select>
+      <html:label for="zotagent-codex-path">Codex CLI</html:label>
+      <html:input id="zotagent-codex-path" data-pref="codexPath" />
+      <html:label for="zotagent-codex-platform">Codex 平台</html:label>
+      <html:select id="zotagent-codex-platform" data-pref="codexPlatform">
+        <html:option value="wsl">WSL (Linux)</html:option>
+        <html:option value="windows">Windows</html:option>
+      </html:select>
+      <html:label for="zotagent-claude-path">Claude Code</html:label>
+      <html:input id="zotagent-claude-path" data-pref="claudePath" />
+      <html:label for="zotagent-claude-platform">Claude Code 平台</html:label>
+      <html:select id="zotagent-claude-platform" data-pref="claudePlatform">
+        <html:option value="wsl">WSL (Linux)</html:option>
+        <html:option value="windows">Windows</html:option>
+      </html:select>
+      <html:label for="zotagent-default-agent">默认 Agent</html:label>
+      <html:select id="zotagent-default-agent" data-pref="defaultAgent">
+        <html:option value="opencode">OpenCode</html:option>
+        <html:option value="codex">Codex</html:option>
+        <html:option value="claude-code">Claude Code</html:option>
+      </html:select>
+    </html:div>
+    <html:p style="margin:4px 0 0;font-size:11px;color:#666;">路径说明: WSL 平台填 Linux 路径 (如 /home/.../bin/claude)；Windows 平台填 WSL 可见的路径 (如 /mnt/c/Users/.../claude.exe)</html:p>
+    <hbox style="margin-top:8px;gap:6px;">
+      <button id="zotagent-test-opencode" label="测试 OpenCode" />
+      <button id="zotagent-test-codex" label="测试 Codex" />
+      <button id="zotagent-test-claude" label="测试 Claude Code" />
+    </hbox>
+    <html:pre id="zotagent-agent-result" style="min-height:60px;margin-top:8px;white-space:pre-wrap;font-size:11px;background:#f5f5f5;padding:6px;border-radius:4px;"></html:pre>
+  </groupbox>
+
+  <groupbox>
+    <label><html:h2>选区与笔记</html:h2></label>
+    <checkbox
+      id="zotagent-receive-selections"
+      label="新对话框默认接收 PDF 选区"
+      data-pref="receiveSelections"
+    />
+    <checkbox
+      id="zotagent-auto-save"
+      label="生成完成后自动保存子笔记"
+      data-pref="autoSaveNotes"
+    />
+    <checkbox
+      id="zotagent-auto-insert"
+      label="生成完成后自动插入活动笔记光标"
+      data-pref="autoInsertAtCursor"
+    />
+  </groupbox>
+
+  <groupbox>
+    <label><html:h2>快捷键</html:h2></label>
+    <html:div class="zotagent-pref-grid">
+      <html:label for="zotagent-shortcut">打开/关闭对话框</html:label>
+      <html:input id="zotagent-shortcut" data-pref="shortcut" placeholder="Ctrl+Shift+Y" />
+    </html:div>
+    <html:p style="margin:4px 0 0;font-size:11px;color:#666;">格式: Ctrl+Shift+Y, Ctrl+Alt+Z 等。修改后需重启 Zotero 生效。</html:p>
+  </groupbox>
+</vbox>

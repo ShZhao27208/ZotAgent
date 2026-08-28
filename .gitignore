@@ -1,0 +1,7 @@
+build/
+dist/
+*.xpi
+*.log
+.runtime-token
+node_modules/
+.zotero-test/

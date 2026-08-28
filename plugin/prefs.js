@@ -1,0 +1,16 @@
+pref("extensions.zotagent.runtimeEndpoint", "http://127.0.0.1:24119");
+pref("extensions.zotagent.runtimeToken", "");
+pref("extensions.zotagent.autoStartRuntime", true);
+pref("extensions.zotagent.runtimeScriptPath", "/mnt/d/AselfRE/ASelfvRep/ZotAgent/runtime/src/index.js");
+pref("extensions.zotagent.runtimeNodePath", "/home/shzhao/.nvm/versions/node/v24.18.0/bin/node");
+pref("extensions.zotagent.defaultAgent", "claude-code");
+pref("extensions.zotagent.defaultWorkingDirectory", "/home/shzhao");
+pref("extensions.zotagent.wslDistro", "Ubuntu");
+pref("extensions.zotagent.opencodePath", "/home/shzhao/.nvm/versions/node/v24.18.0/bin/opencode");
+pref("extensions.zotagent.codexPath", "/home/shzhao/.nvm/versions/node/v24.18.0/bin/codex");
+pref("extensions.zotagent.claudePath", "/home/shzhao/.nvm/versions/node/v24.18.0/bin/claude");
+pref("extensions.zotagent.receiveSelections", true);
+pref("extensions.zotagent.selectionMode", "replace");
+pref("extensions.zotagent.autoSaveNotes", false);
+pref("extensions.zotagent.autoInsertAtCursor", false);
+pref("extensions.zotagent.shortcut", "Ctrl+Shift+Y");

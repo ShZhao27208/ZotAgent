@@ -1,0 +1,19 @@
+{
+  "manifest_version": 2,
+  "name": "ZotAgent",
+  "version": "0.1.1",
+  "description": "Run OpenCode, Codex CLI, and Claude Code as full agents inside Zotero.",
+  "author": "ShZhao",
+  "icons": {
+    "48": "content/icon.svg",
+    "96": "content/icon.svg"
+  },
+  "applications": {
+    "zotero": {
+      "id": "zotagent@shzhao.local",
+      "update_url": "https://raw.githubusercontent.com/ShZhao27208/ZotAgent/main/update.json",
+      "strict_min_version": "6.999",
+      "strict_max_version": "10.*"
+    }
+  }
+}
