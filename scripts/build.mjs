@@ -21,6 +21,10 @@ await fs.rm(distDir, { recursive: true, force: true });
 await fs.mkdir(pluginBuild, { recursive: true });
 await fs.mkdir(distDir, { recursive: true });
 await fs.cp(pluginSource, pluginBuild, { recursive: true });
+const vendorDir = path.join(pluginBuild, "content/vendor");
+await fs.mkdir(vendorDir, { recursive: true });
+await fs.copyFile(path.join(root, "node_modules/@xterm/xterm/lib/xterm.js"), path.join(vendorDir, "xterm.js"));
+await fs.copyFile(path.join(root, "node_modules/@xterm/xterm/css/xterm.css"), path.join(vendorDir, "xterm.css"));
 
 const packageJSON = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
 const manifestPath = path.join(pluginBuild, "manifest.json");

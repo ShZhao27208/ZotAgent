@@ -950,6 +950,8 @@
 
 .zotagent-pty-container { border-color: var(--za-line-strong); background: #f7fbfd; }
 .zotagent-pty-output { color: #24515a; background: #f7fbfd; }
+.zotagent-pty-output .xterm { height: 100%; padding: 8px 10px; }
+.zotagent-pty-output .xterm-viewport { background: #f7fbfd !important; }
 .zotagent-pty-input { color: #173f47; background: #eaf4f5; border-color: #bed5d9; }
 .zotagent-pty-input::placeholder { color: #7e989e; }
 .zotagent-dialog .zotagent-multi-mode {

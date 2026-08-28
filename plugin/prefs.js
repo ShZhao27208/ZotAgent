@@ -1,7 +1,7 @@
 pref("extensions.zotagent.runtimeEndpoint", "http://127.0.0.1:24119");
 pref("extensions.zotagent.runtimeToken", "");
 pref("extensions.zotagent.autoStartRuntime", true);
-pref("extensions.zotagent.runtimeScriptPath", "/mnt/d/AselfRE/ASelfvRep/ZotAgent/runtime/src/index.js");
+pref("extensions.zotagent.runtimeScriptPath", "/home/shzhao/ASelfvRep/ASelfvRep/ZotAgent/runtime/src/index.js");
 pref("extensions.zotagent.runtimeNodePath", "/home/shzhao/.nvm/versions/node/v24.18.0/bin/node");
 pref("extensions.zotagent.defaultAgent", "claude-code");
 pref("extensions.zotagent.defaultWorkingDirectory", "/home/shzhao");

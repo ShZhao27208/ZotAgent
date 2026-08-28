@@ -50,7 +50,11 @@
     async healthy() { return (await this.probe()) === "running"; },
 
     launch() {
-      const runtimePath = String(pref("runtimeScriptPath", "")).trim();
+      let runtimePath = String(pref("runtimeScriptPath", "")).trim();
+      if (runtimePath === "/mnt/d/AselfRE/ASelfvRep/ZotAgent/runtime/src/index.js") {
+        runtimePath = "/home/shzhao/ASelfvRep/ASelfvRep/ZotAgent/runtime/src/index.js";
+        setPref("runtimeScriptPath", runtimePath);
+      }
       if (!runtimePath.startsWith("/")) {
         throw new Error("Runtime 脚本路径必须是 WSL 绝对路径");
       }
@@ -690,7 +694,7 @@
 
       this.ptyContainer = createElement(this.doc, "div", "zotagent-pty-container");
       this.ptyContainer.style.display = "none";
-      this.ptyOutput = createElement(this.doc, "pre", "zotagent-pty-output");
+      this.ptyOutput = createElement(this.doc, "div", "zotagent-pty-output");
       this.ptyInput = createElement(this.doc, "input", "zotagent-pty-input");
       this.ptyInput.placeholder = "终端输入 (Enter 发送)";
       this.ptyInput.addEventListener("keydown", (event) => {
@@ -1442,6 +1446,19 @@
     async startPty() {
       try {
         await RuntimeManager.ensureRunning();
+        await this.controller.xtermReady;
+        if (typeof this.win.Terminal !== "function") throw new Error("终端渲染器加载失败");
+        this._terminal?.dispose();
+        this._terminal = new this.win.Terminal({
+          cursorBlink: true,
+          convertEol: false,
+          fontFamily: '"Cascadia Code", Consolas, monospace',
+          fontSize: 12,
+          theme: { background: "#f7fbfd", foreground: "#24515a", cursor: "#159f91", selectionBackground: "#cde9e5" },
+        });
+        this.ptyOutput.replaceChildren();
+        this._terminal.open(this.ptyOutput);
+        this._terminal.onData((data) => this.sendPtyInput(data));
         const response = await Promise.race([
           fetch(this.runtime.endpoint("/v1/pty/create"), {
             method: "POST",
@@ -1450,8 +1467,8 @@
               agent: this.agent,
               cwd: this.cwdInput.value.trim() || "/home/shzhao",
               sessionID: this.sessions[this.agent] || null,
-              cols: 120,
-              rows: 36,
+              cols: this._terminal.cols,
+              rows: this._terminal.rows,
             }),
           }),
           new Promise((_, reject) => setTimeout(() => reject(new Error("PTY 创建超时")), 8000)),
@@ -1459,10 +1476,14 @@
         if (!response.ok) throw new Error(`PTY 创建失败: ${response.status}`);
         const data = await response.json();
         this._ptyID = data.ptyID;
-        this.ptyOutput.textContent = "";
+        this.ptyInput.style.display = "none";
+        this._terminal.focus();
         this.renderStatus(`PTY 已连接 (${this.agent})`);
         this.streamPtyOutput();
       } catch (error) {
+        this._terminal?.dispose();
+        this._terminal = null;
+        this.ptyInput.style.display = "";
         this.renderStatus("PTY: " + error.message, true);
       }
     }
@@ -1487,8 +1508,7 @@
             try {
               const event = JSON.parse(line);
               if (event.type === "pty.output" || event.type === "pty.stderr") {
-                this.ptyOutput.textContent += event.data;
-                this.ptyOutput.scrollTop = this.ptyOutput.scrollHeight;
+                this._terminal?.write(event.data);
               }
               if (event.type === "pty.closed") {
                 this.renderStatus(`PTY 已关闭 (退出码 ${event.code})`);
@@ -1513,15 +1533,19 @@
     }
 
     async closePty() {
-      if (!this._ptyID) return;
-      try {
-        await fetch(this.runtime.endpoint("/v1/pty/close"), {
-          method: "POST",
-          headers: this.runtime.headers(),
-          body: JSON.stringify({ ptyID: this._ptyID }),
-        });
-      } catch {}
+      if (this._ptyID) {
+        try {
+          await fetch(this.runtime.endpoint("/v1/pty/close"), {
+            method: "POST",
+            headers: this.runtime.headers(),
+            body: JSON.stringify({ ptyID: this._ptyID }),
+          });
+        } catch {}
+      }
       this._ptyID = null;
+      this._terminal?.dispose();
+      this._terminal = null;
+      this.ptyInput.style.display = "";
     }
 
     destroy() {
@@ -1559,6 +1583,21 @@
       style.rel = "stylesheet";
       style.href = "chrome://zotagent/content/styles.css";
       this.doc.documentElement.appendChild(style);
+
+      const xtermStyle = createElement(this.doc, "link");
+      xtermStyle.id = "zotagent-xterm-styles";
+      xtermStyle.rel = "stylesheet";
+      xtermStyle.href = "chrome://zotagent/content/vendor/xterm.css";
+      this.doc.documentElement.appendChild(xtermStyle);
+      this.xtermReady = new Promise((resolve, reject) => {
+        if (typeof this.win.Terminal === "function") return resolve();
+        const script = createElement(this.doc, "script");
+        script.id = "zotagent-xterm-script";
+        script.src = "chrome://zotagent/content/vendor/xterm.js";
+        script.addEventListener("load", resolve, { once: true });
+        script.addEventListener("error", () => reject(new Error("xterm.js 加载失败")), { once: true });
+        this.doc.documentElement.appendChild(script);
+      });
 
       this.layer = createElement(this.doc, "div", "zotagent-layer");
       this.layer.id = "zotagent-layer";
@@ -1732,15 +1771,22 @@
     pollSelection() {
       try {
         const reader = this.getReader();
-        const annotation = reader?._internalReader?._lastView?._selectionPopup?.annotation;
+        const view = reader?._internalReader?._lastView;
+        const annotation = view?._annotationPopup?.annotation || view?._selectionPopup?.annotation;
         const text = String(annotation?.text || "").trim();
-        if (!text) return;
+        if (!annotation) return;
         const pageIndex = readPosition(annotation);
-        const key = `${reader?._item?.id || ""}:${pageIndex}:${text}`;
+        const key = `${reader?._item?.id || ""}:${annotation.id || ""}:${pageIndex}:${text}`;
         if (key === this.lastSelectionKey) return;
         this.lastSelectionKey = key;
         const snapshot = { text, pageIndex, attachmentID: reader?._item?.id || null, annotation };
-        for (const dialog of this.dialogs.values()) dialog.receiveSelection(snapshot);
+        for (const dialog of this.dialogs.values()) {
+          if (text) dialog.receiveSelection(snapshot);
+          else {
+            dialog.captureTarget = annotation;
+            dialog.captureAttachmentID = snapshot.attachmentID;
+          }
+        }
       } catch { /* Zotero internal API may change between versions */ }
     }
 
@@ -1759,6 +1805,8 @@
       }
       this.layer?.remove();
       this.doc.querySelector("#zotagent-styles")?.remove();
+      this.doc.querySelector("#zotagent-xterm-styles")?.remove();
+      this.doc.querySelector("#zotagent-xterm-script")?.remove();
     }
   }
 
