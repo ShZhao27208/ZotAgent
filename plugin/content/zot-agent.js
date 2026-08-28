@@ -443,10 +443,19 @@
       if (!annotation || !attachmentID) return false;
       const attachment = await Zotero.Items.getAsync?.(attachmentID) || Zotero.Items.get(attachmentID);
       const candidates = attachment?.getAnnotations?.() || [];
-      const annotationID = annotation.id || annotation.annotationID || annotation.key;
+      const annotationData = annotation.data || annotation.annotation || {};
+      const annotationID = annotation.key || annotation.annotationKey || annotation.id ||
+        annotation.annotationID || annotationData.key || annotationData.annotationKey ||
+        annotationData.id || annotationData.annotationID;
+      const annotationPosition = readPosition(annotation);
+      const annotationText = String(annotation.text || annotationData.text || "").trim();
       const target = candidates.find((item) => {
-        const key = item.key || item.id;
-        return annotationID && String(key) === String(annotationID);
+        const key = item.key || item.id || item.annotationKey;
+        if (annotationID && String(key) === String(annotationID)) return true;
+        if (annotationPosition === null) return false;
+        const itemPosition = readPosition(item);
+        if (itemPosition !== annotationPosition) return false;
+        return !annotationText || String(item.annotationText || item.getField?.("annotationText") || "").trim() === annotationText;
       });
       if (!target) return false;
       const previous = String(target.getField?.("annotationComment") || "").trim();
@@ -845,7 +854,6 @@
       }
       const iframeDoc = iframeWin.document;
       this._capturingImage = true;
-      this.captureTarget = null;
 
       const previousLayerVisibility = this.controller.layer?.style.visibility || "";
       if (this.controller.layer) this.controller.layer.style.visibility = "hidden";
