@@ -430,6 +430,23 @@
       this.lastInsertError = "当前 Zotero 编辑器不支持光标插入";
       return false;
     }
+
+    static async insertIntoAnnotation(annotation, attachmentID, markdown) {
+      if (!annotation || !attachmentID) return false;
+      const attachment = await Zotero.Items.getAsync?.(attachmentID) || Zotero.Items.get(attachmentID);
+      const candidates = attachment?.getAnnotations?.() || [];
+      const annotationID = annotation.id || annotation.annotationID || annotation.key;
+      const target = candidates.find((item) => {
+        const key = item.key || item.id;
+        return annotationID && String(key) === String(annotationID);
+      });
+      if (!target) return false;
+      const previous = String(target.getField?.("annotationComment") || "").trim();
+      const html = markdownToNoteHTML(markdown);
+      target.setField("annotationComment", previous ? `${previous}<br/>${html}` : html);
+      await target.saveTx();
+      return true;
+    }
   }
 
   class RuntimeClient {
@@ -631,16 +648,26 @@
       this.selectionLabel = createElement(this.doc, "div", "zotagent-selection-label", "PDF 选区");
       this.selectionInput = createElement(this.doc, "textarea", "zotagent-selection-input");
       this.selectionInput.placeholder = "选择 PDF 文字后会自动出现在这里";
+      this.capturePreview = createElement(this.doc, "button", "zotagent-capture-preview");
+      this.capturePreview.type = "button";
+      this.capturePreview.title = "点击预览截图";
+      this.capturePreview.style.display = "none";
+      this.capturePreview.addEventListener("click", () => this.showCapturePreview());
+      this.capturePreviewImage = createElement(this.doc, "img");
+      this.capturePreviewImage.alt = "PDF 截图预览";
+      this.capturePreview.appendChild(this.capturePreviewImage);
       const clearSelection = createElement(this.doc, "button", "zotagent-small-button", "清除");
       clearSelection.addEventListener("click", () => {
         this.selectionInput.value = "";
         this.selectionLabel.textContent = "PDF 选区";
         this.capturedImage = null;
+        this.capturePreview.style.display = "none";
+        this.captureTarget = null;
       });
       const captureBtn = createElement(this.doc, "button", "zotagent-small-button", "截图");
       captureBtn.title = "框选 PDF 区域截图";
       captureBtn.addEventListener("click", () => this.startAreaCapture());
-      this.selectionBox.append(this.selectionLabel, captureBtn, this.selectionInput, clearSelection);
+      this.selectionBox.append(this.selectionLabel, captureBtn, this.capturePreview, this.selectionInput, clearSelection);
 
       this.messagesElement = createElement(this.doc, "div", "zotagent-messages");
       this.statusElement = createElement(this.doc, "div", "zotagent-status", "就绪");
@@ -749,6 +776,9 @@
 
     receiveSelection(snapshot) {
       if (!this.receiveSelections) return;
+      if (this._capturingImage) return;
+      this.captureTarget = snapshot.annotation || null;
+      this.captureAttachmentID = snapshot.attachmentID || null;
       const mode = String(pref("selectionMode", "replace"));
       this.selectionInput.value =
         mode === "append" && this.selectionInput.value
@@ -807,6 +837,8 @@
       }
       const iframeDoc = iframeWin.document;
       const viewContainer = iframeDoc.querySelector("#viewerContainer") || iframeDoc.body;
+      this._capturingImage = true;
+      this.captureTarget = null;
 
       const overlay = iframeDoc.createElement("div");
       overlay.style.cssText = "position:fixed;inset:0;z-index:999999;cursor:crosshair;background:rgba(0,0,0,0.08);";
@@ -817,6 +849,8 @@
 
       let startX = 0, startY = 0, dragging = false;
       const onDown = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         startX = e.clientX;
         startY = e.clientY;
         dragging = true;
@@ -827,6 +861,7 @@
         rect.style.height = "0";
       };
       const onMove = (e) => {
+        e.preventDefault();
         if (!dragging) return;
         const x = Math.min(e.clientX, startX);
         const y = Math.min(e.clientY, startY);
@@ -836,8 +871,11 @@
         rect.style.height = Math.abs(e.clientY - startY) + "px";
       };
       const onUp = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         dragging = false;
         overlay.remove();
+        this._capturingImage = false;
         const x = Math.min(e.clientX, startX);
         const y = Math.min(e.clientY, startY);
         const w = Math.abs(e.clientX - startX);
@@ -846,12 +884,13 @@
         this.captureRegion(iframeWin, x, y, w, h);
       };
       const onEsc = (e) => {
-        if (e.key === "Escape") { overlay.remove(); }
+        if (e.key === "Escape") { overlay.remove(); this._capturingImage = false; }
       };
       overlay.addEventListener("pointerdown", onDown);
       overlay.addEventListener("pointermove", onMove);
       overlay.addEventListener("pointerup", onUp);
       iframeDoc.addEventListener("keydown", onEsc, { once: true });
+      overlay.addEventListener("selectstart", (event) => event.preventDefault());
       this.renderStatus("框选 PDF 区域后松开鼠标完成截图");
     }
 
@@ -940,11 +979,27 @@
         ctx.drawImage(canvas, Math.round(sx), Math.round(sy), Math.round(sw), Math.round(sh), 0, 0, tempCanvas.width, tempCanvas.height);
         const dataURL = tempCanvas.toDataURL("image/png");
         this.capturedImage = dataURL;
+        this.capturePreviewImage.src = dataURL;
+        this.capturePreview.style.display = "inline-flex";
         this.selectionLabel.textContent = `PDF 截图 (${tempCanvas.width}x${tempCanvas.height})`;
         this.renderStatus("截图完成，发送时将作为图像上下文");
       } catch (error) {
+        this._capturingImage = false;
         this.renderStatus("截图失败: " + error.message, true);
       }
+    }
+
+    showCapturePreview() {
+      if (!this.capturedImage) return;
+      const panel = createElement(this.doc, "div", "zotagent-image-preview");
+      const close = createElement(this.doc, "button", "zotagent-icon-button", "×");
+      close.title = "关闭预览";
+      close.addEventListener("click", () => panel.remove());
+      const image = createElement(this.doc, "img");
+      image.src = this.capturedImage;
+      image.alt = "PDF 截图";
+      panel.append(close, image);
+      this.element.appendChild(panel);
     }
 
     buildPrompt(question) {
@@ -1221,9 +1276,17 @@
       this.renderStatus("Markdown 已复制");
     }
 
-    insertLastAnswer() {
+    async insertLastAnswer() {
       const answer = this.lastAnswer();
       if (!answer) return this.renderStatus("没有可插入的回答", true);
+      try {
+        if (await NoteService.insertIntoAnnotation(this.captureTarget, this.captureAttachmentID, answer)) {
+          this.renderStatus("已插入当前高亮/下划线注释");
+          return;
+        }
+      } catch (error) {
+        Zotero.logError(error);
+      }
       const inserted = NoteService.insertAtActiveCursor(answer);
       this.renderStatus(inserted ? "已插入当前笔记" : NoteService.lastInsertError, !inserted);
     }
@@ -1378,6 +1441,7 @@
 
     async startPty() {
       try {
+        await RuntimeManager.ensureRunning();
         const response = await Promise.race([
           fetch(this.runtime.endpoint("/v1/pty/create"), {
             method: "POST",
@@ -1386,6 +1450,8 @@
               agent: this.agent,
               cwd: this.cwdInput.value.trim() || "/home/shzhao",
               sessionID: this.sessions[this.agent] || null,
+              cols: 120,
+              rows: 36,
             }),
           }),
           new Promise((_, reject) => setTimeout(() => reject(new Error("PTY 创建超时")), 8000)),
@@ -1673,7 +1739,7 @@
         const key = `${reader?._item?.id || ""}:${pageIndex}:${text}`;
         if (key === this.lastSelectionKey) return;
         this.lastSelectionKey = key;
-        const snapshot = { text, pageIndex, attachmentID: reader?._item?.id || null };
+        const snapshot = { text, pageIndex, attachmentID: reader?._item?.id || null, annotation };
         for (const dialog of this.dialogs.values()) dialog.receiveSelection(snapshot);
       } catch { /* Zotero internal API may change between versions */ }
     }

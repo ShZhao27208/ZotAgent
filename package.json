@@ -13,5 +13,8 @@
   },
   "engines": {
     "node": ">=24"
+  },
+  "dependencies": {
+    "node-pty": "^1.1.0"
   }
 }

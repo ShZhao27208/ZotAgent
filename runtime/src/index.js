@@ -28,6 +28,8 @@ import {
   writePtyInput,
   closePtySession,
   listPtySessions,
+  subscribePtySession,
+  resizePtySession,
 } from "./pty-manager.js";
 
 const config = loadConfig();
@@ -346,7 +348,7 @@ const server = http.createServer(async (request, response) => {
         config.defaultWindowsCwd,
       );
       const interactive = adapter.interactiveArgs(body.sessionID || null, cwd);
-      const session = createPtySession(adapter.executable, interactive.args, interactive.cwd, {});
+      const session = createPtySession(adapter.executable, interactive.args, interactive.cwd, {}, { cols: body.cols, rows: body.rows });
       writeJSON(response, 200, { ptyID: session.id, agent, cwd });
       return;
     }
@@ -364,20 +366,23 @@ const server = http.createServer(async (request, response) => {
         return;
       }
       startNDJSON(response);
-      const onData = (chunk) => {
-        writeEvent(response, { type: "pty.output", data: chunk.toString("utf8"), ptyID });
+      const onData = (data, state) => {
+        if (data) writeEvent(response, { type: "pty.output", data, ptyID });
+        if (state && !response.writableEnded) {
+          writeEvent(response, { type: "pty.closed", code: state.exitCode, signal: state.signal, ptyID });
+          response.end();
+        }
       };
-      session.child.stdout.on("data", onData);
-      session.child.stderr.on("data", (chunk) => {
-        writeEvent(response, { type: "pty.stderr", data: chunk.toString("utf8"), ptyID });
-      });
-      session.child.on("close", (code) => {
-        writeEvent(response, { type: "pty.closed", code, ptyID });
-        if (!response.writableEnded) response.end();
-      });
+      const unsubscribe = subscribePtySession(ptyID, onData);
       response.on("close", () => {
-        session.child.stdout.removeListener("data", onData);
+        unsubscribe?.();
       });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/v1/pty/resize") {
+      const body = await readJSON(request);
+      const resized = resizePtySession(String(body.ptyID || ""), body.cols, body.rows);
+      writeJSON(response, resized ? 200 : 404, { resized });
       return;
     }
     if (request.method === "POST" && url.pathname === "/v1/pty/close") {

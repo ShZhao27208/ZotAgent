@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { createPtySession, writePtyInput, closePtySession, subscribePtySession } from "../runtime/src/pty-manager.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -49,6 +50,21 @@ test("Runtime Host requires authentication and reports health", async (context) 
     }),
   });
   assert.equal(validConfig.status, 200);
+});
+
+test("PTY manager provides interactive terminal IO", async () => {
+  const session = createPtySession("/bin/sh", ["-c", "read line; printf 'echo:%s\\n' \"$line\""], process.cwd(), {});
+  let output = "";
+  const done = new Promise((resolve) => {
+    subscribePtySession(session.id, (data, state) => {
+      if (data) output += data;
+      if (state) resolve();
+    });
+  });
+  assert.equal(writePtyInput(session.id, "hello\n"), true);
+  await done;
+  assert.match(output, /echo:hello/);
+  assert.equal(closePtySession(session.id), true);
 });
 
 async function waitForReady(child) {
