@@ -51,8 +51,12 @@
 
     launch() {
       let runtimePath = String(pref("runtimeScriptPath", "")).trim();
-      if (runtimePath === "/mnt/d/AselfRE/ASelfvRep/ZotAgent/runtime/src/index.js") {
-        runtimePath = "/home/shzhao/ASelfvRep/ASelfvRep/ZotAgent/runtime/src/index.js";
+      const currentRuntimePath = "/home/shzhao/AGitRep/SelfRep/ZotAgent/runtime/src/index.js";
+      if (
+        runtimePath === "/mnt/d/AselfRE/ASelfvRep/ZotAgent/runtime/src/index.js" ||
+        runtimePath === "/home/shzhao/ASelfvRep/ASelfvRep/ZotAgent/runtime/src/index.js"
+      ) {
+        runtimePath = currentRuntimePath;
         setPref("runtimeScriptPath", runtimePath);
       }
       if (!runtimePath.startsWith("/")) {
