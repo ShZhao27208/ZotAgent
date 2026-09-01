@@ -36,6 +36,12 @@ test("failed agent requests expose stderr details", () => {
   assert.match(source, /退出码.*detail/);
 });
 
+test("multi-reference context keeps a locked primary document", () => {
+  assert.match(source, /if \(this\.primaryContext\) return/);
+  assert.match(source, /主文献:/);
+  assert.match(source, /\[this\.context, \.\.\.this\.extraItems\]/);
+});
+
 test("long capture keeps native scrolling and waits for confirmation", () => {
   const start = source.indexOf("    _captureLongSlices(");
   const end = source.indexOf("    _captureViewportRegion(", start);

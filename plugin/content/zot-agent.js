@@ -725,6 +725,7 @@
       this.lastProcessError = "";
       this.receiveSelections = Boolean(pref("receiveSelections", true));
       this.extraItems = [];
+      this.primaryContext = null;
       this.runtime = new RuntimeClient(this);
       this.element = this.build();
       this.controller.layer.appendChild(this.element);
@@ -808,7 +809,15 @@
       importBtn.title = "将 Zotero 主面板当前选中的条目添加为额外参考文献";
       importBtn.addEventListener("click", () => this.importSelectedItems());
       this.extraItemsList = createElement(this.doc, "div", "zotagent-extra-items");
-      this.refBar.append(this.fullTextCheckbox, fullTextLabel, importBtn);
+      this.multiModeSelect = createElement(this.doc, "select", "zotagent-multi-mode");
+      for (const [value, text] of [["combined", "综合分析"], ["separate", "分别处理"]]) {
+        const option = createElement(this.doc, "option", "", text);
+        option.value = value;
+        this.multiModeSelect.appendChild(option);
+      }
+      this.multiModeSelect.addEventListener("change", () => { this._multiMode = this.multiModeSelect.value; });
+      this._multiMode = "combined";
+      this.refBar.append(this.fullTextCheckbox, fullTextLabel, importBtn, this.multiModeSelect);
 
       this.messagesElement = createElement(this.doc, "div", "zotagent-messages");
       this.statusElement = createElement(this.doc, "div", "zotagent-status", "就绪");
@@ -889,32 +898,25 @@
     }
 
     updateContext() {
-      this.context = this.controller.getActiveContext();
+      if (this.primaryContext) return;
+      const active = this.controller.getActiveContext();
+      this.context = active ? (this.primaryContext = active.items?.[0]
+        ? { ...active, ...active.items[0], items: [active.items[0]] }
+        : { ...active, items: [active] }) : null;
       if (!this.context) {
         this.contextBar.textContent = "未绑定文献";
         this.contextBar.title = "";
         this._multiMode = null;
         return;
       }
-      const count = this.context.items?.length || 1;
-      if (count > 1) {
-        this.contextBar.innerHTML = "";
-        const label = createElement(this.doc, "span", "", `已选择 ${count} 篇文献 — `);
-        const modeSelect = createElement(this.doc, "select", "zotagent-multi-mode");
-        for (const [value, text] of [["combined", "综合分析"], ["separate", "分别处理"]]) {
-          const opt = createElement(this.doc, "option", "", text);
-          opt.value = value;
-          if (this._multiMode === value) opt.selected = true;
-          modeSelect.appendChild(opt);
-        }
-        modeSelect.addEventListener("change", () => { this._multiMode = modeSelect.value; });
-        this._multiMode = this._multiMode || "combined";
-        this.contextBar.append(label, modeSelect);
-      } else {
-        this.contextBar.textContent = this.context.title || "未命名文献";
-        this._multiMode = null;
-      }
+      this.contextBar.innerHTML = "";
+      this.contextBar.append(
+        createElement(this.doc, "span", "zotagent-primary-label", "主文献: "),
+        createElement(this.doc, "strong", "", this.context.title || "未命名文献"),
+      );
       this.contextBar.title = this.context.attachmentPath || this.context.title || "";
+      this.multiModeSelect.style.display = "inline-block";
+      this.renderExtraItems();
     }
 
     importSelectedItems() {
@@ -943,6 +945,10 @@
 
     renderExtraItems() {
       this.extraItemsList.replaceChildren();
+      if (!this.extraItems.length) {
+        this.extraItemsList.textContent = "暂无参考文献。请在 Zotero 主页面多选后点击“导入选中文献”。";
+        return;
+      }
       for (let i = 0; i < this.extraItems.length; i++) {
         const entry = this.extraItems[i];
         const row = createElement(this.doc, "div", "zotagent-extra-item");
@@ -1394,11 +1400,7 @@
 
     buildPrompt(question) {
       const blocks = [];
-      const allItems = [];
-      if (this.context) {
-        const items = this.context.items || [this.context];
-        for (const item of items) allItems.push(item);
-      }
+      const allItems = this.context ? [{ title: this.context.title, topItem: this.context.topItem }] : [];
       for (const entry of this.extraItems) {
         allItems.push({ title: entry.title, topItem: entry.topItem });
       }
@@ -1633,7 +1635,7 @@
     }
 
     async sendSeparate(question) {
-      const items = this.context.items;
+      const items = [this.context, ...this.extraItems].filter(Boolean);
       const wantFullText = this.fullTextCheckbox.checked;
       this.addMessage("user", `[分别处理 ${items.length} 篇] ${question}`);
       this.promptInput.value = "";
