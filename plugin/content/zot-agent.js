@@ -866,22 +866,6 @@
       return null;
     }
 
-    _readReaderSelection(iframeWin) {
-      const candidates = [iframeWin, iframeWin?.wrappedJSObject].filter(Boolean);
-      for (const win of candidates) {
-        try {
-          const selections = [win.getSelection?.(), win.document?.getSelection?.()];
-          for (const selection of selections) {
-            const text = String(selection?.toString?.() || "").replace(/\s+/g, " ").trim();
-            if (text) return text;
-          }
-        } catch (error) {
-          Zotero.debug(`[ZotAgent] PDF selection read failed: ${error.message}`);
-        }
-      }
-      return "";
-    }
-
     startAreaCapture() {
       const reader = this.controller.getReader();
       if (!reader) return this.renderStatus("请先打开 PDF 阅读器", true);
@@ -2026,23 +2010,32 @@
           }
         }
         const view = reader?._internalReader?._lastView;
-        const annotation = view?._annotationPopup?.annotation || view?._selectionPopup?.annotation || null;
-        const selectedText = this._readReaderSelection(activeIframe);
-        const text = String(annotation?.text || selectedText || "").trim();
-        if (!annotation && !text) return;
-        const pageIndex = readPosition(annotation);
-        const key = `${reader?._item?.id || ""}:${annotation?.id || "selection"}:${pageIndex}:${text}`;
+        const selectionAnnotation = view?._selectionPopup?.annotation || null;
+        const annotationTarget = view?._annotationPopup?.annotation || null;
+        const text = String(selectionAnnotation?.text || "").trim();
+        if (!text) {
+          if (annotationTarget) {
+            for (const dialog of this.dialogs.values()) {
+              dialog.captureTarget = annotationTarget;
+              dialog.captureAttachmentID = reader?._item?.id || null;
+            }
+          }
+          return;
+        }
+        const pageIndex = readPosition(selectionAnnotation);
+        const key = `${reader?._item?.id || ""}:${pageIndex}:${text}`;
         if (key === this.lastSelectionKey) return;
         this.lastSelectionKey = key;
-        const snapshot = { text, pageIndex, attachmentID: reader?._item?.id || null, annotation };
-        for (const dialog of this.dialogs.values()) {
-          if (text) dialog.receiveSelection(snapshot);
-          else {
-            dialog.captureTarget = annotation;
-            dialog.captureAttachmentID = snapshot.attachmentID;
-          }
-        }
-      } catch { /* Zotero internal API may change between versions */ }
+        const snapshot = {
+          text,
+          pageIndex,
+          attachmentID: reader?._item?.id || null,
+          annotation: selectionAnnotation,
+        };
+        for (const dialog of this.dialogs.values()) dialog.receiveSelection(snapshot);
+      } catch (error) {
+        Zotero.debug(`[ZotAgent] PDF selection polling failed: ${error.message}`);
+      }
     }
 
     destroy() {

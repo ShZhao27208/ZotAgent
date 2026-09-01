@@ -1,6 +1,6 @@
 {
   "name": "zotagent",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Full-agent bridge for Zotero 9, OpenCode, Codex CLI, and Claude Code",
   "type": "module",
