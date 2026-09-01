@@ -8,7 +8,7 @@ pref("extensions.zotagent.defaultWorkingDirectory", "/home/shzhao");
 pref("extensions.zotagent.wslDistro", "Ubuntu");
 pref("extensions.zotagent.opencodePath", "/home/shzhao/.nvm/versions/node/v24.18.0/bin/opencode");
 pref("extensions.zotagent.codexPath", "/home/shzhao/.nvm/versions/node/v24.18.0/bin/codex");
-pref("extensions.zotagent.claudePath", "/home/shzhao/.nvm/versions/node/v24.18.0/bin/claude");
+pref("extensions.zotagent.claudePath", "/home/shzhao/.nvm/versions/node/v24.18.0/lib/node_modules/@anthropic-ai/.claude-code-0lZTFBhY/bin/claude.exe");
 pref("extensions.zotagent.receiveSelections", true);
 pref("extensions.zotagent.selectionMode", "replace");
 pref("extensions.zotagent.autoSaveNotes", false);

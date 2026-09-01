@@ -5,7 +5,8 @@ import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 import { writeFileSync, mkdirSync } from "node:fs";
-import { loadConfig } from "./config.js";
+import { loadConfig, resolveClaudePath } from "./config.js";
+import { existsSync } from "node:fs";
 import {
   envelope,
   isAuthorized,
@@ -266,7 +267,9 @@ const server = http.createServer(async (request, response) => {
             if (!isAbsolute(str)) {
               throw new Error(`${name} executable must be an absolute path`);
             }
-            config.executables[name] = str;
+            config.executables[name] = name === "claude-code" && !existsSync(str)
+              ? resolveClaudePath()
+              : str;
           }
         }
         const platform = body.platforms?.[name];

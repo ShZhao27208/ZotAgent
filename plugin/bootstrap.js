@@ -12,6 +12,9 @@ if (!Services) {
 function install() {}
 
 async function startup({ rootURI }) {
+  if (Zotero.ZotAgent?.hooks?.onShutdown) {
+    try { await Zotero.ZotAgent.hooks.onShutdown(); } catch (_) {}
+  }
   const startupService = Components.classes[
     "@mozilla.org/addons/addon-manager-startup;1"
   ].getService(Components.interfaces.amIAddonManagerStartup);

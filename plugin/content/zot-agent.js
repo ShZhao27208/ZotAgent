@@ -1850,6 +1850,7 @@
     }
 
     mountMainToolbarButton() {
+      this.doc.querySelector("#zotagent-toolbar-button")?.remove();
       const btn = this.doc.createXULElement("toolbarbutton");
       btn.id = "zotagent-toolbar-button";
       btn.setAttribute("class", "zotero-tb-button");

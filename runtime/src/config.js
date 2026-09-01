@@ -1,9 +1,22 @@
 import { randomBytes } from "node:crypto";
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+
+export function resolveClaudePath() {
+  const base = "/home/shzhao/.nvm/versions/node/v24.18.0/lib/node_modules/@anthropic-ai";
+  try {
+    const candidates = readdirSync(base)
+      .filter((name) => name.startsWith(".claude-code-") && existsSync(join(base, name, "bin/claude.exe")))
+      .sort().reverse();
+    if (candidates.length) return join(base, candidates[0], "bin/claude.exe");
+  } catch {}
+  return "/home/shzhao/.nvm/versions/node/v24.18.0/bin/claude";
+}
 
 const DEFAULT_PATHS = {
   opencode: "/home/shzhao/.nvm/versions/node/v24.18.0/bin/opencode",
   codex: "/home/shzhao/.nvm/versions/node/v24.18.0/bin/codex",
-  "claude-code": "/home/shzhao/.nvm/versions/node/v24.18.0/bin/claude",
+  "claude-code": resolveClaudePath(),
 };
 
 const DEFAULT_PLATFORMS = {
