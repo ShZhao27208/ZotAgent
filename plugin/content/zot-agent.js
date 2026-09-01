@@ -351,6 +351,76 @@
   class NoteService {
     static lastInsertError = "";
 
+    static insertIntoReaderCursor(reader, markdown) {
+      this.lastInsertError = "";
+      if (!reader || !markdown) return false;
+      const internal = reader._internalReader;
+      const views = [
+        reader._iframeWindow,
+        reader._iframe?.contentWindow,
+        reader._window,
+        internal?._primaryView?._iframeWindow,
+        internal?._primaryView?._iframe?.contentWindow,
+        internal?._secondaryView?._iframeWindow,
+        internal?._secondaryView?._iframe?.contentWindow,
+      ].filter(Boolean);
+      const candidates = [];
+      for (const win of views) {
+        try {
+          const active = win.document.activeElement;
+          if (active && this._isEditable(active)) candidates.push(active);
+          for (const selector of [
+            ".annotation-popup [contenteditable='true']",
+            ".annotation-popup textarea",
+            ".annotation-popup input",
+            "[data-testid*='annotation'] [contenteditable='true']",
+            "[contenteditable='true']",
+            "textarea",
+          ]) candidates.push(...win.document.querySelectorAll(selector));
+        } catch (_) {}
+      }
+      const target = candidates.find((element) => this._isEditable(element));
+      if (!target) return false;
+      try {
+        target.focus?.();
+        if (target.isContentEditable) {
+          const doc = target.ownerDocument;
+          const win = doc.defaultView;
+          const selection = win.getSelection?.();
+          const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+          if (range && target.contains(range.commonAncestorContainer)) {
+            range.deleteContents();
+            range.insertNode(range.createContextualFragment(markdownToNoteHTML(markdown)));
+            range.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          } else if (typeof doc.execCommand === "function") {
+            doc.execCommand("insertHTML", false, markdownToNoteHTML(markdown));
+          } else target.textContent += markdown;
+        } else {
+          const value = String(target.value || "");
+          const start = Number.isInteger(target.selectionStart) ? target.selectionStart : value.length;
+          const end = Number.isInteger(target.selectionEnd) ? target.selectionEnd : start;
+          target.value = value.slice(0, start) + markdown + value.slice(end);
+          target.selectionStart = target.selectionEnd = start + markdown.length;
+        }
+        const EventCtor = target.ownerDocument.defaultView.Event;
+        target.dispatchEvent(new EventCtor("input", { bubbles: true }));
+        target.dispatchEvent(new EventCtor("change", { bubbles: true }));
+        return true;
+      } catch (error) {
+        Zotero.logError(error);
+        this.lastInsertError = `注释光标插入失败: ${error.message}`;
+        return false;
+      }
+    }
+
+    static _isEditable(element) {
+      if (!element || element.disabled || element.readOnly) return false;
+      const tag = String(element.localName || element.tagName || "").toLowerCase();
+      return Boolean(element.isContentEditable || tag === "textarea" || (tag === "input" && /^(text|search|url|email|tel)?$/.test(element.type || "text")));
+    }
+
     static async createChildNote(context, markdown) {
       const parent = context?.topItem;
       if (!parent || parent.libraryID === undefined || parent.libraryID === null) {
@@ -1547,6 +1617,11 @@
       const answer = this.lastAnswer();
       if (!answer) return this.renderStatus("没有可插入的回答", true);
       try {
+        const reader = this.controller.getReader?.();
+        if (NoteService.insertIntoReaderCursor(reader, answer)) {
+          this.renderStatus("已插入当前注释光标");
+          return;
+        }
         if (await NoteService.insertIntoAnnotation(this.captureTarget, this.captureAttachmentID, answer)) {
           this.renderStatus("已插入当前高亮/下划线注释");
           return;

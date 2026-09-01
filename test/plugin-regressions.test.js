@@ -12,6 +12,13 @@ test("PDF selection uses the Zotero popup event and all reader views", () => {
   assert.match(source, /_secondaryView\?\._iframeWindow\?\.document/);
 });
 
+test("insert cursor supports PDF annotation popup editors", () => {
+  assert.match(source, /insertIntoReaderCursor\(reader, markdown\)/);
+  assert.match(source, /\.annotation-popup \[contenteditable='true'\]/);
+  assert.match(source, /range\.createContextualFragment\(markdownToNoteHTML\(markdown\)\)/);
+  assert.match(source, /target\.selectionStart/);
+});
+
 test("long capture keeps native scrolling and waits for confirmation", () => {
   const start = source.indexOf("    _captureLongSlices(");
   const end = source.indexOf("    _captureViewportRegion(", start);
