@@ -4,6 +4,7 @@
   const PLUGIN_ID = "zotagent@shzhao.local";
   const PREF_ROOT = "extensions.zotagent.";
   const controllers = new Map();
+  const pdfTextCache = new Map();
   let dialogSequence = 0;
   let preferencePaneID = null;
 
@@ -14,6 +15,26 @@
 
   function setPref(name, value) {
     Zotero.Prefs.set(PREF_ROOT + name, value, true);
+  }
+
+  async function extractPdfText(attachment) {
+    const id = Number(attachment?.id || 0);
+    if (!id) return { text: "", source: "none" };
+    if (pdfTextCache.has(id)) return pdfTextCache.get(id);
+    const task = (async () => {
+      try {
+        const result = await Zotero.PDFWorker?.getFullText?.(id);
+        const text = String(result?.text || "").replace(/\u0000/g, "").trim();
+        if (text) return { text, source: "Zotero PDFWorker" };
+      } catch (error) {
+        Zotero.debug(`[ZotAgent] PDF text extraction failed: ${error.message}`);
+      }
+      return { text: "", source: "none" };
+    })();
+    pdfTextCache.set(id, task);
+    const result = await task;
+    pdfTextCache.set(id, result);
+    return result;
   }
 
   const runtimeProcesses = new Set();
@@ -1171,8 +1192,9 @@
           return parts.join(" | ");
         });
         blocks.push("## Zotero 当前文献\n" + descriptions.join("\n"));
-        const wslPath = this.context.wslPath;
-        if (wslPath) blocks.push(`Attachment: ${wslPath}`);
+      }
+      if (this.pdfText) {
+        blocks.push("## Zotero PDF 全文\n" + this.pdfText);
       }
       if (this.capturedImage) {
         blocks.push("## PDF 截图\n[已附加 PDF 区域截图作为图像上下文]");
@@ -1252,6 +1274,21 @@
       if (!question || this.requestID) return;
       this.updateContext();
 
+      this.pdfText = "";
+      const attachment = this.context?.attachment;
+      if (attachment) {
+        this.renderStatus("正在从 Zotero 提取 PDF 全文...");
+        const extracted = await extractPdfText(attachment);
+        if (extracted.text) {
+          const maxChars = 60000;
+          this.pdfText = extracted.text.length > maxChars
+            ? `${extracted.text.slice(0, maxChars)}\n\n[全文超过当前上下文上限，已截断；请使用定向问题继续读取。]`
+            : extracted.text;
+        } else {
+          this.renderStatus("Zotero 未提取到 PDF 文本，将仅使用选区/截图", true);
+        }
+      }
+
       if (this._multiMode === "separate" && this.context?.items?.length > 1) {
         await this.sendSeparate(question);
         return;
@@ -1273,7 +1310,7 @@
         cwd: this.cwdInput.value.trim() || "/home/shzhao",
         model: null,
         prompt: this.buildPrompt(question),
-        files: this.context?.wslPath ? [this.context.wslPath] : [],
+        files: [],
         image: this.capturedImage || null,
       };
 
@@ -1377,7 +1414,7 @@
           cwd: this.cwdInput.value.trim() || "/home/shzhao",
           model: null,
           prompt,
-          files: singleContext.wslPath ? [singleContext.wslPath] : [],
+          files: [],
           image: null,
         };
 
