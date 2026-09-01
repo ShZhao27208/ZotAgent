@@ -48,6 +48,6 @@ test("Claude creates and resumes explicit native sessions", () => {
 });
 
 test("native terminals start top-level interactive clients", () => {
-  assert.deepEqual(adapters.opencode.interactiveArgs("session-1", request.cwd).args, []);
+  assert.deepEqual(adapters.opencode.interactiveArgs("session-1", request.cwd).args, [request.cwd]);
   assert.deepEqual(adapters["claude-code"].interactiveArgs("session-1", request.cwd).args, []);
 });

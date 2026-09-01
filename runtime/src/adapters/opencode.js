@@ -20,7 +20,8 @@ export class OpenCodeAdapter extends AgentAdapter {
   }
 
   interactiveArgs(sessionID, cwd) {
-    // The interactive TUI accepts no subcommand; --dir only works with `run`.
-    return { args: [], cwd };
+    // Top-level OpenCode uses the optional project positional argument. The
+    // --dir flag belongs to `run` and makes the TUI print help/exit 1.
+    return { args: [cwd], cwd };
   }
 }
