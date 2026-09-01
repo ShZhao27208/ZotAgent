@@ -1631,9 +1631,10 @@
       try {
         await RuntimeManager.ensureRunning();
         await this.controller.xtermReady;
-        if (typeof this.win.Terminal !== "function") throw new Error("终端渲染器加载失败");
+        const Terminal = this.controller.xtermTerminal;
+        if (typeof Terminal !== "function") throw new Error("终端渲染器加载失败");
         this._terminal?.dispose();
-        this._terminal = new this.win.Terminal({
+        this._terminal = new Terminal({
           cursorBlink: true,
           convertEol: false,
           fontFamily: '"Cascadia Code", Consolas, monospace',
@@ -1775,11 +1776,24 @@
       xtermStyle.href = "chrome://zotagent/content/vendor/xterm.css";
       this.doc.documentElement.appendChild(xtermStyle);
       this.xtermReady = new Promise((resolve, reject) => {
-        if (typeof this.win.Terminal === "function") return resolve();
+        if (typeof this.win.Terminal === "function") {
+          this.xtermTerminal = this.win.Terminal;
+          return resolve();
+        }
         const script = createElement(this.doc, "script");
         script.id = "zotagent-xterm-script";
         script.src = "chrome://zotagent/content/vendor/xterm.js";
-        script.addEventListener("load", resolve, { once: true });
+        script.addEventListener("load", () => {
+          if (typeof this.win.Terminal !== "function") {
+            reject(new Error("xterm.js 未导出 Terminal"));
+            return;
+          }
+          // Keep xterm private to ZotAgent instead of leaving a global that can
+          // collide with another Zotero plugin using the same library.
+          this.xtermTerminal = this.win.Terminal;
+          try { delete this.win.Terminal; } catch { this.win.Terminal = undefined; }
+          resolve();
+        }, { once: true });
         script.addEventListener("error", () => reject(new Error("xterm.js 加载失败")), { once: true });
         this.doc.documentElement.appendChild(script);
       });
@@ -1995,6 +2009,7 @@
       this.doc.querySelector("#zotagent-styles")?.remove();
       this.doc.querySelector("#zotagent-xterm-styles")?.remove();
       this.doc.querySelector("#zotagent-xterm-script")?.remove();
+      this.xtermTerminal = null;
     }
   }
 
