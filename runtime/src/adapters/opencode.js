@@ -20,7 +20,7 @@ export class OpenCodeAdapter extends AgentAdapter {
   }
 
   interactiveArgs(sessionID, cwd) {
-    // The interactive TUI is the top-level command; --session belongs to `run`.
-    return { args: ["--dir", cwd], cwd };
+    // The interactive TUI accepts no subcommand; --dir only works with `run`.
+    return { args: [], cwd };
   }
 }

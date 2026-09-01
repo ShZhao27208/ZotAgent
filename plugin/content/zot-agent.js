@@ -8,6 +8,25 @@
   let dialogSequence = 0;
   let preferencePaneID = null;
 
+  function getReaderIframeWindow(reader) {
+    const candidates = [
+      reader?._internalReader?._lastView,
+      reader?._internalReader?._primaryView,
+      reader?._internalReader?._secondaryView,
+      reader?._primaryView,
+      reader,
+    ];
+    for (const c of candidates) {
+      const win = c?._iframeWindow || c?._iframe?.contentWindow;
+      if (win?.document) return win;
+      try {
+        const wrapped = win?.wrappedJSObject;
+        if (wrapped?.document) return wrapped;
+      } catch {}
+    }
+    return null;
+  }
+
   function pref(name, fallback) {
     const value = Zotero.Prefs.get(PREF_ROOT + name, true);
     return value === undefined || value === null ? fallback : value;
@@ -899,22 +918,7 @@
     }
 
     _getReaderIframeWindow(reader) {
-      const candidates = [
-        reader?._internalReader?._lastView,
-        reader?._internalReader?._primaryView,
-        reader?._internalReader?._secondaryView,
-        reader?._primaryView,
-        reader,
-      ];
-      for (const c of candidates) {
-        const win = c?._iframeWindow || c?._iframe?.contentWindow;
-        if (win?.document) return win;
-        try {
-          const wrapped = win?.wrappedJSObject;
-          if (wrapped?.document) return wrapped;
-        } catch {}
-      }
-      return null;
+      return getReaderIframeWindow(reader);
     }
 
     _getPdfViewerApplication(reader) {
@@ -2223,7 +2227,7 @@
     pollSelection() {
       try {
         const reader = this.getReader();
-        const activeIframe = this._getReaderIframeWindow(reader);
+        const activeIframe = getReaderIframeWindow(reader);
         for (const dialog of this.dialogs.values()) {
           if (dialog._capturingImage && dialog._captureReaderWindow !== activeIframe) {
             dialog._captureCleanup?.();

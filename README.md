@@ -4,7 +4,7 @@ ZotAgent 将本机 WSL 中真实的 OpenCode、Codex CLI 和 Claude Code 接入 
 
 ## 当前版本
 
-`0.1.1` 是可构建的 Phase 0/1 骨架，已包含：
+`0.2.9` 是可构建的 Phase 0/1 骨架，已包含：
 
 - Zotero 9 Manifest V2 插件；
 - 可拖动、缩放、最小化的多对话框；
@@ -36,7 +36,7 @@ npm run build
 npm run verify
 ```
 
-构建产物：`dist/zotagent-0.1.1.xpi`。
+构建产物：`dist/zotagent-0.2.9.xpi`。
 
 ## 启动 Runtime Host
 
@@ -56,7 +56,7 @@ Runtime 默认只接受 Bearer Token 鉴权；命令使用参数数组和 `shell
 ## 安装插件
 
 1. 创建独立 Zotero 测试 profile 和小型测试库。
-2. 在该 profile 的附加组件管理器中安装 `dist/zotagent-0.1.1.xpi`。
+2. 在该 profile 的附加组件管理器中安装 `dist/zotagent-0.2.9.xpi`。
 3. 启动 Runtime Host，填写 Token 并测试三个 Agent。
 4. 从 Zotero `工具 -> 新建 ZotAgent 对话框` 或右下角 `+` 打开窗口。
 
