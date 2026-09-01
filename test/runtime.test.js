@@ -68,8 +68,13 @@ test("PTY manager provides interactive terminal IO", async () => {
   assert.equal(closePtySession(session.id), true);
 });
 
-test("Claude path resolution does not depend on a stale Node version", () => {
-  assert.notEqual(resolveClaudePath(), "/home/shzhao/.nvm/versions/node/v24.18.0/bin/claude");
+test("Claude path resolution returns an existing executable", async () => {
+  const resolved = resolveClaudePath();
+  assert.ok(resolved, "resolveClaudePath should return a non-empty string");
+  if (resolved.startsWith("/")) {
+    const { existsSync } = await import("node:fs");
+    assert.ok(existsSync(resolved), `resolved path should exist: ${resolved}`);
+  }
 });
 
 async function waitForReady(child) {
