@@ -31,6 +31,11 @@ test("native terminal labels do not expose the internal PTY name", () => {
   assert.doesNotMatch(source, /终端实验/);
 });
 
+test("failed agent requests expose stderr details", () => {
+  assert.match(source, /event\.data\.stderr/);
+  assert.match(source, /退出码.*detail/);
+});
+
 test("long capture keeps native scrolling and waits for confirmation", () => {
   const start = source.indexOf("    _captureLongSlices(");
   const end = source.indexOf("    _captureViewportRegion(", start);

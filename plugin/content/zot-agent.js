@@ -703,6 +703,7 @@
       this.sessions = Object.create(null);
       this.messages = [];
       this.requestID = null;
+      this.lastProcessError = "";
       this.receiveSelections = Boolean(pref("receiveSelections", true));
       this.runtime = new RuntimeClient(this);
       this.element = this.build();
@@ -1499,11 +1500,14 @@
           if (event.type === "approval.requested") this.showApprovalUI(event);
           if (event.type === "process.stderr") {
             const line = event.data?.line || "";
+            this.lastProcessError = `${this.lastProcessError || ""}${line}\n`.slice(-4000);
             if (/error|fatal|panic|exception/i.test(line)) this.renderStatus(line, true);
           }
           if (event.type === "error") this.renderStatus(event.data.message, true);
           if (event.type === "request.completed") {
-            this.renderStatus(event.data.code === 0 ? "完成" : `退出码 ${event.data.code}`, event.data.code !== 0);
+            const failed = event.data.code !== 0;
+            const detail = event.data.stderr || this.lastProcessError;
+            this.renderStatus(failed && detail ? `退出码 ${event.data.code}: ${detail.trim().split(/\r?\n/).at(-1)}` : (failed ? `退出码 ${event.data.code}` : "完成"), failed);
           }
         });
         const answer = this.lastAnswer();

@@ -128,6 +128,7 @@ function runAgent(request, response) {
     detached: process.platform !== "win32",
     stdio: ["pipe", "pipe", "pipe"],
   });
+  let stderrTail = "";
   running.set(request.requestID, { child, request, response });
 
   const stdout = createInterface({ input: child.stdout });
@@ -162,7 +163,10 @@ function runAgent(request, response) {
 
   const stderr = createInterface({ input: child.stderr });
   stderr.on("line", (line) => {
-    if (line) writeEvent(response, envelope(request, "process.stderr", { line }));
+    if (line) {
+      stderrTail = (stderrTail + line + "\n").slice(-4000);
+      writeEvent(response, envelope(request, "process.stderr", { line }));
+    }
   });
 
   child.on("error", (error) => {
@@ -174,6 +178,7 @@ function runAgent(request, response) {
     writeEvent(response, envelope(request, "request.completed", {
       code,
       signal,
+      stderr: stderrTail.trim() || null,
       nativeSessionID: request.nativeSessionID,
     }));
     if (!response.writableEnded) response.end();
