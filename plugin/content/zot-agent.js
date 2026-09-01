@@ -684,7 +684,10 @@
       const captureBtn = createElement(this.doc, "button", "zotagent-small-button", "截图");
       captureBtn.title = "框选 PDF 区域截图";
       captureBtn.addEventListener("click", () => this.startAreaCapture());
-      this.selectionBox.append(this.selectionLabel, captureBtn, this.capturePreview, this.selectionInput, clearSelection);
+      const longCaptureBtn = createElement(this.doc, "button", "zotagent-small-button", "长截图");
+      longCaptureBtn.title = "框选横向范围后滚动鼠标滚轮拼成长截图";
+      longCaptureBtn.addEventListener("click", () => this.startLongCapture());
+      this.selectionBox.append(this.selectionLabel, captureBtn, longCaptureBtn, this.capturePreview, this.selectionInput, clearSelection);
 
       this.messagesElement = createElement(this.doc, "div", "zotagent-messages");
       this.statusElement = createElement(this.doc, "div", "zotagent-status", "就绪");
@@ -941,7 +944,103 @@
       this.renderStatus("框选 PDF 区域后松开鼠标完成截图");
     }
 
-    captureRegion(iframeWin, x, y, w, h) {
+    startLongCapture() {
+      const reader = this.controller.getReader();
+      const iframeWin = this._getReaderIframeWindow(reader);
+      if (!iframeWin) return this.renderStatus("无法访问阅读器视图，请确认 PDF 已加载完成", true);
+      const iframeDoc = iframeWin.document;
+      const scrollContainer = iframeDoc.querySelector("#viewerContainer") || iframeDoc.scrollingElement || iframeDoc.documentElement;
+      this._capturingImage = true;
+      const previousLayerVisibility = this.controller.layer?.style.visibility || "";
+      if (this.controller.layer) this.controller.layer.style.visibility = "hidden";
+      const overlay = iframeDoc.createElement("div");
+      overlay.style.cssText = "position:fixed;inset:0;z-index:2147483646;cursor:crosshair;background:rgba(0,0,0,.08);user-select:none;-moz-user-select:none";
+      const rect = iframeDoc.createElement("div");
+      rect.style.cssText = "position:fixed;border:2px dashed #159f91;background:rgba(21,159,145,.12);display:none";
+      overlay.appendChild(rect);
+      (iframeDoc.body || iframeDoc.documentElement).appendChild(overlay);
+      const oldSelect = iframeDoc.documentElement.style.userSelect;
+      iframeDoc.documentElement.style.userSelect = "none";
+      let sx = 0; let sy = 0; let dragging = false;
+      const cleanup = () => {
+        overlay.remove();
+        iframeWin.removeEventListener("keydown", onKey, true);
+        iframeDoc.documentElement.style.userSelect = oldSelect;
+        if (this.controller.layer) this.controller.layer.style.visibility = previousLayerVisibility;
+        this._capturingImage = false;
+        this._captureCleanup = null;
+      };
+      const onKey = (event) => {
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); cleanup(); this.renderStatus("已取消长截图"); }
+      };
+      const onDown = (event) => {
+        event.preventDefault(); event.stopPropagation(); sx = event.clientX; sy = event.clientY; dragging = true;
+        rect.style.display = "block"; rect.style.left = `${sx}px`; rect.style.top = `${sy}px`;
+      };
+      const onMove = (event) => {
+        if (!dragging) return; event.preventDefault();
+        rect.style.left = `${Math.min(sx, event.clientX)}px`; rect.style.top = `${Math.min(sy, event.clientY)}px`;
+        rect.style.width = `${Math.abs(event.clientX - sx)}px`; rect.style.height = `${Math.abs(event.clientY - sy)}px`;
+      };
+      const onUp = (event) => {
+        if (!dragging) return; event.preventDefault(); event.stopPropagation(); dragging = false;
+        const x = Math.min(sx, event.clientX); const y = Math.min(sy, event.clientY);
+        const w = Math.abs(event.clientX - sx); const h = Math.abs(event.clientY - sy);
+        if (w < 20 || h < 20) { cleanup(); return; }
+        overlay.remove();
+        this._captureLongSlices(iframeWin, scrollContainer, x, y, w, h, cleanup);
+      };
+      overlay.addEventListener("pointerdown", onDown); overlay.addEventListener("pointermove", onMove); overlay.addEventListener("pointerup", onUp);
+      iframeWin.addEventListener("keydown", onKey, true);
+      this._captureCleanup = cleanup;
+      this.renderStatus("拖出横向范围，然后滚动鼠标滚轮；停止滚动后按 Enter 完成长截图");
+    }
+
+    async _captureLongSlices(iframeWin, scrollContainer, x, y, w, h, cleanup) {
+      const slices = []; const startTop = scrollContainer.scrollTop;
+      let lastTop = startTop; let idleTimer = null; let finished = false;
+      const finish = async () => {
+        if (finished) return; finished = true; iframeWin.removeEventListener("wheel", onWheel, true); iframeWin.removeEventListener("keydown", onKey, true);
+        if (idleTimer) clearTimeout(idleTimer);
+        if (slices.length) await this._stitchCaptureSlices(iframeWin, slices, Math.max(0, Math.round(w)), Math.max(0, Math.round(h)));
+        scrollContainer.scrollTop = startTop; cleanup();
+      };
+      const capture = () => {
+        const data = this.captureRegion(iframeWin, x, y, w, h, false);
+        if (data && data !== slices.at(-1)?.data) slices.push({ data, top: scrollContainer.scrollTop });
+      };
+      const onWheel = (event) => {
+        event.preventDefault(); event.stopPropagation();
+        if (Math.abs(event.deltaY) < 1) return;
+        scrollContainer.scrollTop = Math.max(0, scrollContainer.scrollTop + event.deltaY);
+        setTimeout(() => { capture(); lastTop = scrollContainer.scrollTop; }, 180);
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => this.renderStatus("已记录当前区域，继续滚动或按 Enter 完成"), 450);
+      };
+      const onKey = (event) => { if (event.key === "Enter") { event.preventDefault(); finish(); } };
+      iframeWin.addEventListener("wheel", onWheel, true); iframeWin.addEventListener("keydown", onKey, true);
+      capture();
+      this.renderStatus("长截图记录中：继续滚轮滚动，按 Enter 完成，Esc 取消");
+    }
+
+    async _stitchCaptureSlices(iframeWin, slices, width, height) {
+      const images = [];
+      for (const slice of slices) {
+        const image = await new Promise((resolve, reject) => { const img = new iframeWin.Image(); img.onload = () => resolve(img); img.onerror = reject; img.src = slice.data; });
+        images.push(image);
+      }
+      const overlap = Math.min(24, Math.floor(height * 0.12));
+      const canvas = iframeWin.document.createElement("canvas");
+      canvas.width = width; canvas.height = height + Math.max(0, images.length - 1) * (height - overlap);
+      const ctx = canvas.getContext("2d");
+      images.forEach((image, index) => ctx.drawImage(image, 0, index * (height - overlap), width, height));
+      this.capturedImage = canvas.toDataURL("image/png");
+      this.capturePreviewImage.src = this.capturedImage;
+      this.capturePreview.style.display = "inline-flex";
+      this.selectionLabel.textContent = `PDF 长截图 (${canvas.width}x${canvas.height})`;
+    }
+
+    captureRegion(iframeWin, x, y, w, h, updateUI = true) {
       try {
         const iframeDoc = iframeWin.document;
         const reader = this.controller.getReader();
@@ -1003,7 +1102,7 @@
 
         if (!canvas) {
           this.renderStatus("未找到 PDF 画布，请确认 PDF 页面已渲染完成", true);
-          return;
+          return null;
         }
 
         const canvasRect = canvas.getBoundingClientRect();
@@ -1016,7 +1115,7 @@
 
         if (sw <= 0 || sh <= 0) {
           this.renderStatus("选区超出画布范围", true);
-          return;
+          return null;
         }
 
         const tempCanvas = iframeDoc.createElement("canvas");
@@ -1025,15 +1124,19 @@
         const ctx = tempCanvas.getContext("2d");
         ctx.drawImage(canvas, Math.round(sx), Math.round(sy), Math.round(sw), Math.round(sh), 0, 0, tempCanvas.width, tempCanvas.height);
         const dataURL = tempCanvas.toDataURL("image/png");
-        this.capturedImage = dataURL;
-        this.capturePreviewImage.src = dataURL;
-        this.capturePreview.style.display = "inline-flex";
-        this.selectionLabel.textContent = `PDF 截图 (${tempCanvas.width}x${tempCanvas.height})`;
-        this.renderStatus("截图完成，发送时将作为图像上下文");
+        if (updateUI) {
+          this.capturedImage = dataURL;
+          this.capturePreviewImage.src = dataURL;
+          this.capturePreview.style.display = "inline-flex";
+          this.selectionLabel.textContent = `PDF 截图 (${tempCanvas.width}x${tempCanvas.height})`;
+          this.renderStatus("截图完成，发送时将作为图像上下文");
+        }
+        return dataURL;
       } catch (error) {
         this._capturingImage = false;
         this._captureCleanup?.();
         this.renderStatus("截图失败: " + error.message, true);
+        return null;
       }
     }
 
