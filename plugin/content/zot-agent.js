@@ -1377,6 +1377,10 @@
       );
     }
 
+    selectedModel() {
+      return this.agent === "opencode" ? String(pref("opencodeModel", "")).trim() || null : null;
+    }
+
     showApprovalUI(event) {
       this.dismissApproval();
       const raw = event.data?.raw || {};
@@ -1457,7 +1461,7 @@
         agent: this.agent,
         nativeSessionID: this.sessions[this.agent] || null,
         cwd: this.cwdInput.value.trim() || "/home/shzhao",
-        model: null,
+        model: this.selectedModel(),
         prompt: this.buildPrompt(question),
         files: [],
         image: this.capturedImage || null,
@@ -1561,7 +1565,7 @@
           agent: this.agent,
           nativeSessionID: null,
           cwd: this.cwdInput.value.trim() || "/home/shzhao",
-          model: null,
+          model: this.selectedModel(),
           prompt,
           files: [],
           image: null,

@@ -19,6 +19,12 @@ test("insert cursor supports PDF annotation popup editors", () => {
   assert.match(source, /target\.selectionStart/);
 });
 
+test("OpenCode model is configurable without affecting other agents", () => {
+  assert.match(source, /opencodeModel/);
+  assert.match(source, /this\.agent === "opencode"/);
+  assert.match(source, /model: this\.selectedModel\(\)/);
+});
+
 test("long capture keeps native scrolling and waits for confirmation", () => {
   const start = source.indexOf("    _captureLongSlices(");
   const end = source.indexOf("    _captureViewportRegion(", start);
