@@ -38,6 +38,8 @@ test("Claude creates and resumes explicit native sessions", () => {
   const fresh = adapters["claude-code"].buildInvocation(request);
   assert.match(fresh.nativeSessionID, /^[0-9a-f-]{36}$/);
   assert.ok(fresh.args.includes("--session-id"));
+  assert.ok(!fresh.args.includes("--cwd"));
+  assert.equal(fresh.cwd, request.cwd);
   assert.equal(fresh.stdin, request.prompt);
 
   const resumed = adapters["claude-code"].buildInvocation({ ...request, nativeSessionID: "session-1" });

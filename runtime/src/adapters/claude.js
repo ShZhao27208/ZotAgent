@@ -16,7 +16,6 @@ export class ClaudeAdapter extends AgentAdapter {
     if (request.nativeSessionID) args.push("--resume", sessionID);
     else args.push("--session-id", sessionID);
     if (request.model) args.push("--model", request.model);
-    if (request.cwd) args.push("--cwd", request.cwd);
     for (const directory of new Set((request.files || []).map(dirname))) {
       args.push("--add-dir", directory);
     }
