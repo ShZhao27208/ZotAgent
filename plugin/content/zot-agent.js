@@ -791,8 +791,8 @@
       this.stopButton = createElement(this.doc, "button", "zotagent-secondary-button", "停止");
       this.stopButton.disabled = true;
       this.stopButton.addEventListener("click", () => this.stop());
-      const modeToggle = createElement(this.doc, "button", "zotagent-secondary-button", "终端实验");
-      modeToggle.title = "实验性终端视图，当前不等同于完整伪终端";
+      const modeToggle = createElement(this.doc, "button", "zotagent-secondary-button", "打开原生终端");
+      modeToggle.title = "打开当前 Agent 的原生交互终端";
       modeToggle.addEventListener("click", () => this.togglePtyMode());
       composer.append(this.promptInput, this.sendButton, this.stopButton, modeToggle);
 
@@ -1780,7 +1780,8 @@
         this.ptyContainer.style.display = "";
         this.messagesElement.style.display = "none";
         this.selectionBox.style.display = "none";
-        this.renderStatus("PTY 终端模式");
+        const label = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" }[this.agent] || this.agent;
+        this.renderStatus(`${label} 原生终端`);
         await this.startPty();
       }
     }
@@ -1821,13 +1822,14 @@
         this._ptyID = data.ptyID;
         this.ptyInput.style.display = "none";
         this._terminal.focus();
-        this.renderStatus(`PTY 已连接 (${this.agent})`);
+        const label = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" }[this.agent] || this.agent;
+        this.renderStatus(`${label} 原生终端已连接`);
         this.streamPtyOutput();
       } catch (error) {
         this._terminal?.dispose();
         this._terminal = null;
         this.ptyInput.style.display = "";
-        this.renderStatus("PTY: " + error.message, true);
+        this.renderStatus("原生终端启动失败: " + error.message, true);
       }
     }
 
@@ -1854,7 +1856,7 @@
                 this._terminal?.write(event.data);
               }
               if (event.type === "pty.closed") {
-                this.renderStatus(`PTY 已关闭 (退出码 ${event.code})`);
+                this.renderStatus(`原生终端已关闭 (退出码 ${event.code})`);
                 this._ptyID = null;
               }
             } catch {}
@@ -1862,7 +1864,7 @@
           if (done) break;
         }
       } catch {
-        if (this._ptyID) this.renderStatus("PTY 流断开", true);
+        if (this._ptyID) this.renderStatus("原生终端连接断开", true);
       }
     }
 

@@ -25,6 +25,12 @@ test("OpenCode model is configurable without affecting other agents", () => {
   assert.match(source, /model: this\.selectedModel\(\)/);
 });
 
+test("native terminal labels do not expose the internal PTY name", () => {
+  assert.match(source, /打开原生终端/);
+  assert.match(source, /原生终端已连接/);
+  assert.doesNotMatch(source, /终端实验/);
+});
+
 test("long capture keeps native scrolling and waits for confirmation", () => {
   const start = source.indexOf("    _captureLongSlices(");
   const end = source.indexOf("    _captureViewportRegion(", start);

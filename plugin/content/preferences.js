@@ -53,7 +53,7 @@
       lines.push(`  结构化输出: ✓ 支持`);
       lines.push(`  Session 恢复: ✓ 支持 (--resume / --session)`);
       if (agentName === "claude-code") {
-        lines.push(`  PTY 模式: ○ 待实现 (Phase 2)`);
+        lines.push(`  原生终端: ✓ 支持交互会话`);
         lines.push(`  Stream JSON: ✓ --output-format stream-json --verbose`);
       }
       if (agentName === "codex") {
