@@ -956,8 +956,9 @@
         const cancel = makeButton("×", "取消截图", () => { cleanup(); this.renderStatus("已取消截图"); });
         const confirm = makeButton("✓", "确认截图", () => { cleanup(); this.captureRegion(iframeWin, x, y, w, h); }, true);
         const long = makeButton("长截图", "滚动采集并拼成长截图", () => {
-          overlay.remove(); toolbar.remove(); toolbar = null;
-          this._captureLongSlices(iframeWin, iframeDoc.querySelector("#viewerContainer") || iframeDoc.scrollingElement || iframeDoc.documentElement, x, y, w, h, cleanup);
+          toolbar.remove(); toolbar = null;
+          overlay.style.pointerEvents = "none";
+          this._captureLongPage(iframeWin, x, y, w, h, cleanup);
         });
         toolbar.append(long, cancel, confirm);
         (iframeDoc.body || iframeDoc.documentElement).appendChild(toolbar);
@@ -981,6 +982,36 @@
       overlay.addEventListener("selectstart", (event) => event.preventDefault());
       this._captureCleanup = cleanup;
       this.renderStatus("框选 PDF 区域后松开鼠标完成截图");
+    }
+
+    _captureLongPage(iframeWin, x, y, w, h, cleanup) {
+      try {
+        const doc = iframeWin.document;
+        const canvas = [...doc.querySelectorAll(".page canvas, .canvasWrapper canvas, canvas")]
+          .filter((item) => item.width > 0 && item.height > 0)
+          .sort((a, b) => (b.width * b.height) - (a.width * a.height))[0];
+        if (!canvas) throw new Error("未找到 PDF 页面画布");
+        const bounds = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / Math.max(1, bounds.width);
+        const scaleY = canvas.height / Math.max(1, bounds.height);
+        const left = Math.max(0, Math.round((x - bounds.left) * scaleX));
+        const top = Math.max(0, Math.round((y - bounds.top) * scaleY));
+        const width = Math.min(Math.round(w * scaleX), canvas.width - left);
+        const height = canvas.height - top;
+        if (width <= 0 || height <= 0) throw new Error("选区超出 PDF 页面范围");
+        const output = doc.createElement("canvas");
+        output.width = width; output.height = height;
+        output.getContext("2d").drawImage(canvas, left, top, width, height, 0, 0, width, height);
+        this.capturedImage = output.toDataURL("image/png");
+        this.capturePreviewImage.src = this.capturedImage;
+        this.capturePreview.style.display = "inline-flex";
+        this.selectionLabel.textContent = `PDF 长截图 (${width}x${height})`;
+        cleanup();
+        this.renderStatus("长截图完成，可点击缩略图预览");
+      } catch (error) {
+        cleanup();
+        this.renderStatus("长截图失败: " + error.message, true);
+      }
     }
 
     startLongCapture() {
@@ -2010,11 +2041,12 @@
           }
         }
         const view = reader?._internalReader?._lastView;
-        const annotation = view?._annotationPopup?.annotation || view?._selectionPopup?.annotation;
-        const text = String(annotation?.text || "").trim();
-        if (!annotation) return;
+        const annotation = view?._annotationPopup?.annotation || view?._selectionPopup?.annotation || null;
+        const selectedText = String(activeIframe?.getSelection?.()?.toString?.() || "").trim();
+        const text = String(annotation?.text || selectedText || "").trim();
+        if (!annotation && !text) return;
         const pageIndex = readPosition(annotation);
-        const key = `${reader?._item?.id || ""}:${annotation.id || ""}:${pageIndex}:${text}`;
+        const key = `${reader?._item?.id || ""}:${annotation?.id || "selection"}:${pageIndex}:${text}`;
         if (key === this.lastSelectionKey) return;
         this.lastSelectionKey = key;
         const snapshot = { text, pageIndex, attachmentID: reader?._item?.id || null, annotation };
