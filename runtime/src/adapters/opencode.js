@@ -20,8 +20,7 @@ export class OpenCodeAdapter extends AgentAdapter {
   }
 
   interactiveArgs(sessionID, cwd) {
-    const args = ["--dir", cwd];
-    if (sessionID) args.push("--session", sessionID);
-    return { args, cwd };
+    // The interactive TUI is the top-level command; --session belongs to `run`.
+    return { args: ["--dir", cwd], cwd };
   }
 }

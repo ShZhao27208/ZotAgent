@@ -30,9 +30,9 @@ export class ClaudeAdapter extends AgentAdapter {
   }
 
   interactiveArgs(sessionID, cwd) {
-    const args = [];
-    if (sessionID) args.push("--resume", sessionID);
-    return { args, cwd };
+    // Start the native TUI directly. Structured-session IDs are not guaranteed
+    // to be resumable by an interactive Claude process.
+    return { args: [], cwd };
   }
 
   sessionDirectory() {
