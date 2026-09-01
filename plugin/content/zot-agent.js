@@ -894,7 +894,10 @@
 
       let startX = 0, startY = 0, dragging = false;
       let toolbar = null;
+      let longSession = null;
       const cleanup = () => {
+        longSession?.dispose?.();
+        longSession = null;
         overlay.remove();
         toolbar?.remove();
         toolbar = null;
@@ -953,11 +956,27 @@
           button.addEventListener("click", handler);
           return button;
         };
-        const cancel = makeButton("×", "取消截图", () => { cleanup(); this.renderStatus("已取消截图"); });
-        const confirm = makeButton("✓", "确认截图", () => { cleanup(); this.captureRegion(iframeWin, x, y, w, h); }, true);
+        const cancel = makeButton("×", "取消截图", () => {
+          cleanup();
+          this.renderStatus("已取消截图");
+        });
+        const confirm = makeButton("✓", "确认截图", async () => {
+          if (longSession) await longSession.finish();
+          else { cleanup(); this.captureRegion(iframeWin, x, y, w, h); }
+        }, true);
         const long = makeButton("长截图", "滚动采集并拼成长截图", () => {
-          overlay.remove(); toolbar.remove(); toolbar = null;
-          this._captureLongSlices(iframeWin, iframeDoc.querySelector("#viewerContainer") || iframeDoc.scrollingElement || iframeDoc.documentElement, x, y, w, h, cleanup);
+          if (longSession) return;
+          overlay.style.pointerEvents = "none";
+          overlay.style.background = "transparent";
+          rect.style.borderStyle = "solid";
+          rect.style.background = "rgba(21,159,145,.06)";
+          long.disabled = true;
+          long.textContent = "采集中";
+          longSession = this._captureLongSlices(
+            iframeWin,
+            iframeDoc.querySelector("#viewerContainer") || iframeDoc.scrollingElement || iframeDoc.documentElement,
+            x, y, w, h, cleanup,
+          );
         });
         toolbar.append(long, cancel, confirm);
         (iframeDoc.body || iframeDoc.documentElement).appendChild(toolbar);
@@ -983,93 +1002,110 @@
       this.renderStatus("框选 PDF 区域后松开鼠标完成截图");
     }
 
-    startLongCapture() {
-      const reader = this.controller.getReader();
-      const iframeWin = this._getReaderIframeWindow(reader);
-      if (!iframeWin) return this.renderStatus("无法访问阅读器视图，请确认 PDF 已加载完成", true);
-      const iframeDoc = iframeWin.document;
-      const scrollContainer = iframeDoc.querySelector("#viewerContainer") || iframeDoc.scrollingElement || iframeDoc.documentElement;
-      this._capturingImage = true;
-      this._captureReaderWindow = iframeWin;
-      const previousLayerVisibility = this.controller.layer?.style.visibility || "";
-      if (this.controller.layer) this.controller.layer.style.visibility = "hidden";
-      const overlay = iframeDoc.createElement("div");
-      overlay.style.cssText = "position:fixed;inset:0;z-index:2147483646;cursor:crosshair;background:rgba(0,0,0,.08);user-select:none;-moz-user-select:none";
-      const rect = iframeDoc.createElement("div");
-      rect.style.cssText = "position:fixed;border:2px dashed #159f91;background:rgba(21,159,145,.12);display:none";
-      overlay.appendChild(rect);
-      (iframeDoc.body || iframeDoc.documentElement).appendChild(overlay);
-      const oldSelect = iframeDoc.documentElement.style.userSelect;
-      iframeDoc.documentElement.style.userSelect = "none";
-      let sx = 0; let sy = 0; let dragging = false;
-      const cleanup = () => {
-        overlay.remove();
-        iframeWin.removeEventListener("keydown", onKey, true);
-        iframeDoc.documentElement.style.userSelect = oldSelect;
-        if (this.controller.layer) this.controller.layer.style.visibility = previousLayerVisibility;
-        this._capturingImage = false;
-        this._captureReaderWindow = null;
-        this._captureCleanup = null;
+    _captureLongSlices(iframeWin, scrollContainer, x, y, w, h, cleanup) {
+      const slices = [];
+      let captureTimer = null;
+      let finished = false;
+      const doc = iframeWin.document;
+      const preview = doc.createElement("div");
+      preview.style.cssText = `position:fixed;z-index:2147483647;left:${Math.min(iframeWin.innerWidth - 158, x + w + 10)}px;top:${Math.max(8, y)}px;width:142px;padding:5px;background:#fff;border:1px solid #159f91;border-radius:4px;box-shadow:0 3px 12px rgba(0,0,0,.2);font:12px system-ui,sans-serif;color:#24515a;`;
+      const previewImage = doc.createElement("img");
+      previewImage.alt = "长截图实时预览";
+      previewImage.style.cssText = "display:block;width:132px;height:82px;object-fit:contain;background:#f3f8f9;border:1px solid #d5e3e6";
+      const previewLabel = doc.createElement("div");
+      previewLabel.style.cssText = "padding-top:4px;text-align:center";
+      preview.append(previewImage, previewLabel);
+      (doc.body || doc.documentElement).appendChild(preview);
+
+      const capture = () => {
+        if (finished) return;
+        const frame = this._captureViewportRegion(iframeWin, x, y, w, h);
+        if (!frame) return;
+        const top = Number(scrollContainer.scrollTop || 0);
+        if (slices.length && (top <= slices.at(-1).top || frame.data === slices.at(-1).data)) return;
+        slices.push({ ...frame, top });
+        previewImage.src = frame.data;
+        previewLabel.textContent = `已采集 ${slices.length} 帧 · 点击 ✓ 完成`;
+      };
+      const scheduleCapture = () => {
+        if (captureTimer) clearTimeout(captureTimer);
+        captureTimer = setTimeout(capture, 180);
       };
       const onKey = (event) => {
-        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); cleanup(); this.renderStatus("已取消长截图"); }
+        if (event.key === "Enter") { event.preventDefault(); finish(); }
       };
-      const onDown = (event) => {
-        event.preventDefault(); event.stopPropagation(); sx = event.clientX; sy = event.clientY; dragging = true;
-        rect.style.display = "block"; rect.style.left = `${sx}px`; rect.style.top = `${sy}px`;
+      const dispose = () => {
+        if (captureTimer) clearTimeout(captureTimer);
+        captureTimer = null;
+        scrollContainer.removeEventListener("scroll", scheduleCapture);
+        iframeWin.removeEventListener("wheel", scheduleCapture, true);
+        iframeWin.removeEventListener("keydown", onKey, true);
+        preview.remove();
       };
-      const onMove = (event) => {
-        if (!dragging) return; event.preventDefault();
-        rect.style.left = `${Math.min(sx, event.clientX)}px`; rect.style.top = `${Math.min(sy, event.clientY)}px`;
-        rect.style.width = `${Math.abs(event.clientX - sx)}px`; rect.style.height = `${Math.abs(event.clientY - sy)}px`;
-      };
-      const onUp = (event) => {
-        if (!dragging) return; event.preventDefault(); event.stopPropagation(); dragging = false;
-        const x = Math.min(sx, event.clientX); const y = Math.min(sy, event.clientY);
-        const w = Math.abs(event.clientX - sx); const h = Math.abs(event.clientY - sy);
-        if (w < 20 || h < 20) { cleanup(); return; }
-        overlay.remove();
-        this._captureLongSlices(iframeWin, scrollContainer, x, y, w, h, cleanup);
-      };
-      overlay.addEventListener("pointerdown", onDown); overlay.addEventListener("pointermove", onMove); overlay.addEventListener("pointerup", onUp);
-      iframeWin.addEventListener("keydown", onKey, true);
-      this._captureCleanup = cleanup;
-      this.renderStatus("拖出横向范围，然后滚动鼠标滚轮；停止滚动后按 Enter 完成长截图");
-    }
-
-    async _captureLongSlices(iframeWin, scrollContainer, x, y, w, h, cleanup) {
-      const slices = []; const startTop = scrollContainer.scrollTop;
-      let idleTimer = null; let finished = false;
       const finish = async () => {
-        if (finished) return; finished = true; iframeWin.removeEventListener("wheel", onWheel, true); iframeWin.removeEventListener("keydown", onKey, true);
-        if (idleTimer) clearTimeout(idleTimer);
+        if (finished) return;
+        capture();
+        finished = true;
+        dispose();
         try {
-          if (slices.length) await this._stitchCaptureSlices(iframeWin, slices, Math.max(0, Math.round(w)), Math.max(0, Math.round(h)));
-        } catch (error) {
-          this.renderStatus("长截图拼接失败: " + error.message, true);
-        } finally {
-          scrollContainer.scrollTop = startTop;
+          if (!slices.length) throw new Error("没有捕获到 PDF 内容");
+          await this._stitchCaptureSlices(iframeWin, slices, w, h);
           cleanup();
-          this.renderStatus(slices.length > 1 ? "长截图完成" : "未发生滚动，已保存单页截图");
+          this.renderStatus(slices.length > 1 ? "长截图完成，可点击缩略图预览" : "未滚动，已保存当前选区");
+        } catch (error) {
+          cleanup();
+          this.renderStatus("长截图拼接失败: " + error.message, true);
         }
       };
-      const capture = () => {
-        const data = this.captureRegion(iframeWin, x, y, w, h, false);
-        if (data && data !== slices.at(-1)?.data) slices.push({ data, top: scrollContainer.scrollTop });
-      };
-      const onWheel = (event) => {
-        event.preventDefault(); event.stopPropagation();
-        if (Math.abs(event.deltaY) < 1) return;
-        scrollContainer.scrollTop = Math.max(0, scrollContainer.scrollTop + event.deltaY);
-        setTimeout(() => { if (!finished) capture(); }, 180);
-        if (idleTimer) clearTimeout(idleTimer);
-        idleTimer = setTimeout(() => finish(), 900);
-      };
-      const onKey = (event) => { if (event.key === "Enter") { event.preventDefault(); finish(); } };
-      iframeWin.addEventListener("wheel", onWheel, true); iframeWin.addEventListener("keydown", onKey, true);
+
+      scrollContainer.addEventListener("scroll", scheduleCapture, { passive: true });
+      iframeWin.addEventListener("wheel", scheduleCapture, { capture: true, passive: true });
+      iframeWin.addEventListener("keydown", onKey, true);
       capture();
-      idleTimer = setTimeout(() => finish(), 1200);
-      this.renderStatus("长截图记录中：继续滚动，停止约 1 秒后自动完成，Esc 取消");
+      this.renderStatus("长截图采集中：在大框内正常滚动，查看小预览，点击 ✓ 完成，× 取消");
+      return { finish, dispose };
+    }
+
+    _captureViewportRegion(iframeWin, x, y, w, h) {
+      const doc = iframeWin.document;
+      const canvases = [...new Set(doc.querySelectorAll(".page canvas, .canvasWrapper canvas, #viewer canvas"))]
+        .filter((canvas) => {
+          const rect = canvas.getBoundingClientRect();
+          return canvas.width > 0 && canvas.height > 0 && rect.right > x && rect.left < x + w && rect.bottom > y && rect.top < y + h;
+        });
+      if (!canvases.length) return null;
+      const scale = Math.max(1, ...canvases.map((canvas) => {
+        const rect = canvas.getBoundingClientRect();
+        return Math.min(3, canvas.width / Math.max(1, rect.width));
+      }));
+      const output = doc.createElement("canvas");
+      output.width = Math.max(1, Math.round(w * scale));
+      output.height = Math.max(1, Math.round(h * scale));
+      const ctx = output.getContext("2d");
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, output.width, output.height);
+      for (const canvas of canvases) {
+        const rect = canvas.getBoundingClientRect();
+        const left = Math.max(x, rect.left);
+        const top = Math.max(y, rect.top);
+        const right = Math.min(x + w, rect.right);
+        const bottom = Math.min(y + h, rect.bottom);
+        if (right <= left || bottom <= top) continue;
+        const canvasScaleX = canvas.width / Math.max(1, rect.width);
+        const canvasScaleY = canvas.height / Math.max(1, rect.height);
+        ctx.drawImage(
+          canvas,
+          (left - rect.left) * canvasScaleX,
+          (top - rect.top) * canvasScaleY,
+          (right - left) * canvasScaleX,
+          (bottom - top) * canvasScaleY,
+          (left - x) * scale,
+          (top - y) * scale,
+          (right - left) * scale,
+          (bottom - top) * scale,
+        );
+      }
+      return { data: output.toDataURL("image/png"), width: output.width, height: output.height };
     }
 
     async _stitchCaptureSlices(iframeWin, slices, width, height) {
@@ -1078,11 +1114,26 @@
         const image = await new Promise((resolve, reject) => { const img = new iframeWin.Image(); img.onload = () => resolve(img); img.onerror = reject; img.src = slice.data; });
         images.push(image);
       }
-      const overlap = Math.min(24, Math.floor(height * 0.12));
+      const segments = [{ image: images[0], sourceY: 0, sourceHeight: images[0].height }];
+      for (let index = 1; index < images.length; index += 1) {
+        const delta = slices[index].top - slices[index - 1].top;
+        if (delta <= 0) continue;
+        const pixelsPerCss = images[index].height / Math.max(1, height);
+        const newHeight = Math.min(images[index].height, Math.max(1, Math.round(delta * pixelsPerCss)));
+        segments.push({ image: images[index], sourceY: images[index].height - newHeight, sourceHeight: newHeight });
+      }
+      const rawHeight = segments.reduce((sum, segment) => sum + segment.sourceHeight, 0);
+      const outputScale = Math.min(1, 30000 / Math.max(1, rawHeight));
       const canvas = iframeWin.document.createElement("canvas");
-      canvas.width = width; canvas.height = height + Math.max(0, images.length - 1) * (height - overlap);
+      canvas.width = Math.max(1, Math.round(images[0].width * outputScale));
+      canvas.height = Math.max(1, Math.round(rawHeight * outputScale));
       const ctx = canvas.getContext("2d");
-      images.forEach((image, index) => ctx.drawImage(image, 0, index * (height - overlap), width, height));
+      let destinationY = 0;
+      for (const segment of segments) {
+        const destinationHeight = Math.max(1, Math.round(segment.sourceHeight * outputScale));
+        ctx.drawImage(segment.image, 0, segment.sourceY, segment.image.width, segment.sourceHeight, 0, destinationY, canvas.width, destinationHeight);
+        destinationY += destinationHeight;
+      }
       this.capturedImage = canvas.toDataURL("image/png");
       this.capturePreviewImage.src = this.capturedImage;
       this.capturePreview.style.display = "inline-flex";
@@ -1832,6 +1883,7 @@
 
       this.mountMainToolbarButton();
       this.mountReaderToolbarButton();
+      this.mountReaderSelectionListener();
       this.mountShortcut();
 
       const toolsMenu = this.doc.querySelector("#menu_ToolsPopup");
@@ -1908,6 +1960,90 @@
       Zotero.Reader.registerEventListener(
         "renderToolbar",
         this._renderToolbarHandler,
+        PLUGIN_ID,
+      );
+    }
+
+    _normalizeSelectedText(value) {
+      return String(value || "").replace(/\s+/g, " ").trim();
+    }
+
+    _selectionFromDocument(doc) {
+      try {
+        return this._normalizeSelectedText(doc?.defaultView?.getSelection?.()?.toString?.());
+      } catch {
+        return "";
+      }
+    }
+
+    _readerSelectionCandidates(reader) {
+      const internal = reader?._internalReader;
+      const state = internal?._state;
+      const primaryFirst = internal?._lastViewPrimary !== false && state?.primary !== false;
+      const primary = [state?.primaryViewSelectionPopup?.annotation, internal?._primaryView?._selectionPopup?.annotation];
+      const secondary = [state?.secondaryViewSelectionPopup?.annotation, internal?._secondaryView?._selectionPopup?.annotation];
+      return primaryFirst ? [...primary, ...secondary] : [...secondary, ...primary];
+    }
+
+    _readReaderSelection(reader, event = null) {
+      const eventAnnotation = event?.params?.annotation || null;
+      const eventText = this._normalizeSelectedText(
+        eventAnnotation?.text || event?.params?.text || event?.params?.selectedText,
+      );
+      if (eventText) return { text: eventText, annotation: eventAnnotation };
+
+      const eventDocText = this._selectionFromDocument(event?.doc);
+      if (eventDocText) return { text: eventDocText, annotation: eventAnnotation };
+
+      const internal = reader?._internalReader;
+      const documents = [
+        reader?._iframeWindow?.document,
+        reader?._iframe?.contentDocument,
+        reader?._window?.document,
+        internal?._primaryView?._iframeWindow?.document,
+        internal?._primaryView?._iframe?.contentDocument,
+        internal?._secondaryView?._iframeWindow?.document,
+        internal?._secondaryView?._iframe?.contentDocument,
+      ];
+      for (const doc of documents) {
+        const text = this._selectionFromDocument(doc);
+        if (text) return { text, annotation: eventAnnotation };
+      }
+
+      for (const annotation of this._readerSelectionCandidates(reader)) {
+        const text = this._normalizeSelectedText(annotation?.text);
+        if (text) return { text, annotation };
+      }
+      return { text: "", annotation: eventAnnotation };
+    }
+
+    _publishReaderSelection(reader, text, annotation = null) {
+      if (!text || !this.dialogs.size) return;
+      const pageIndex = readPosition(annotation);
+      const key = `${reader?._item?.id || reader?.itemID || ""}:${pageIndex}:${text}`;
+      if (key === this.lastSelectionKey) return;
+      this.lastSelectionKey = key;
+      const snapshot = {
+        text,
+        pageIndex,
+        attachmentID: reader?._item?.id || reader?.itemID || null,
+        annotation,
+      };
+      for (const dialog of this.dialogs.values()) dialog.receiveSelection(snapshot);
+    }
+
+    mountReaderSelectionListener() {
+      this._textSelectionHandler = (event) => {
+        try {
+          const selection = this._readReaderSelection(event.reader, event);
+          this._publishReaderSelection(event.reader, selection.text, selection.annotation);
+        } catch (error) {
+          Zotero.debug(`[ZotAgent] PDF selection event failed: ${error.message}`);
+        }
+      };
+      Zotero.Reader.registerEventListener(
+        "renderTextSelectionPopup",
+        this._textSelectionHandler,
         PLUGIN_ID,
       );
     }
@@ -2010,29 +2146,15 @@
           }
         }
         const view = reader?._internalReader?._lastView;
-        const selectionAnnotation = view?._selectionPopup?.annotation || null;
         const annotationTarget = view?._annotationPopup?.annotation || null;
-        const text = String(selectionAnnotation?.text || "").trim();
-        if (!text) {
-          if (annotationTarget) {
-            for (const dialog of this.dialogs.values()) {
-              dialog.captureTarget = annotationTarget;
-              dialog.captureAttachmentID = reader?._item?.id || null;
-            }
+        if (annotationTarget) {
+          for (const dialog of this.dialogs.values()) {
+            dialog.captureTarget = annotationTarget;
+            dialog.captureAttachmentID = reader?._item?.id || null;
           }
-          return;
         }
-        const pageIndex = readPosition(selectionAnnotation);
-        const key = `${reader?._item?.id || ""}:${pageIndex}:${text}`;
-        if (key === this.lastSelectionKey) return;
-        this.lastSelectionKey = key;
-        const snapshot = {
-          text,
-          pageIndex,
-          attachmentID: reader?._item?.id || null,
-          annotation: selectionAnnotation,
-        };
-        for (const dialog of this.dialogs.values()) dialog.receiveSelection(snapshot);
+        const selection = this._readReaderSelection(reader);
+        this._publishReaderSelection(reader, selection.text, selection.annotation);
       } catch (error) {
         Zotero.debug(`[ZotAgent] PDF selection polling failed: ${error.message}`);
       }
@@ -2047,6 +2169,9 @@
       this._toolbarObserver?.disconnect();
       if (this._renderToolbarHandler) {
         Zotero.Reader.unregisterEventListener("renderToolbar", this._renderToolbarHandler);
+      }
+      if (this._textSelectionHandler) {
+        Zotero.Reader.unregisterEventListener("renderTextSelectionPopup", this._textSelectionHandler);
       }
       if (this._shortcutHandler) {
         this.doc.removeEventListener("keydown", this._shortcutHandler, true);
