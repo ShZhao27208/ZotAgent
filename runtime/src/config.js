@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -10,7 +11,13 @@ export function resolveClaudePath() {
       .sort().reverse();
     if (candidates.length) return join(base, candidates[0], "bin/claude.exe");
   } catch {}
-  return "/home/shzhao/.nvm/versions/node/v24.18.0/bin/claude";
+  for (const command of ["claude", "claude-code"]) {
+    try {
+      const resolved = execFileSync("which", [command], { encoding: "utf8" }).trim();
+      if (resolved) return resolved;
+    } catch {}
+  }
+  return "claude";
 }
 
 const DEFAULT_PATHS = {

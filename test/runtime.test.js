@@ -5,6 +5,7 @@ import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { createPtySession, writePtyInput, closePtySession, subscribePtySession } from "../runtime/src/pty-manager.js";
+import { resolveClaudePath } from "../runtime/src/config.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -65,6 +66,10 @@ test("PTY manager provides interactive terminal IO", async () => {
   await done;
   assert.match(output, /echo:hello/);
   assert.equal(closePtySession(session.id), true);
+});
+
+test("Claude path resolution does not depend on a stale Node version", () => {
+  assert.notEqual(resolveClaudePath(), "/home/shzhao/.nvm/versions/node/v24.18.0/bin/claude");
 });
 
 async function waitForReady(child) {
