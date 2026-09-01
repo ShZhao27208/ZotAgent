@@ -878,6 +878,7 @@
       }
       const iframeDoc = iframeWin.document;
       this._capturingImage = true;
+      this._captureReaderWindow = iframeWin;
 
       const previousLayerVisibility = this.controller.layer?.style.visibility || "";
       if (this.controller.layer) this.controller.layer.style.visibility = "hidden";
@@ -905,6 +906,7 @@
         iframeDoc.documentElement.style.MozUserSelect = previousMozUserSelect;
         if (this.controller.layer) this.controller.layer.style.visibility = previousLayerVisibility;
         this._capturingImage = false;
+        this._captureReaderWindow = null;
         this._captureCleanup = null;
       };
       const blockSelection = (e) => {
@@ -972,6 +974,7 @@
       const iframeDoc = iframeWin.document;
       const scrollContainer = iframeDoc.querySelector("#viewerContainer") || iframeDoc.scrollingElement || iframeDoc.documentElement;
       this._capturingImage = true;
+      this._captureReaderWindow = iframeWin;
       const previousLayerVisibility = this.controller.layer?.style.visibility || "";
       if (this.controller.layer) this.controller.layer.style.visibility = "hidden";
       const overlay = iframeDoc.createElement("div");
@@ -989,6 +992,7 @@
         iframeDoc.documentElement.style.userSelect = oldSelect;
         if (this.controller.layer) this.controller.layer.style.visibility = previousLayerVisibility;
         this._capturingImage = false;
+        this._captureReaderWindow = null;
         this._captureCleanup = null;
       };
       const onKey = (event) => {
@@ -1019,12 +1023,19 @@
 
     async _captureLongSlices(iframeWin, scrollContainer, x, y, w, h, cleanup) {
       const slices = []; const startTop = scrollContainer.scrollTop;
-      let lastTop = startTop; let idleTimer = null; let finished = false;
+      let idleTimer = null; let finished = false;
       const finish = async () => {
         if (finished) return; finished = true; iframeWin.removeEventListener("wheel", onWheel, true); iframeWin.removeEventListener("keydown", onKey, true);
         if (idleTimer) clearTimeout(idleTimer);
-        if (slices.length) await this._stitchCaptureSlices(iframeWin, slices, Math.max(0, Math.round(w)), Math.max(0, Math.round(h)));
-        scrollContainer.scrollTop = startTop; cleanup();
+        try {
+          if (slices.length) await this._stitchCaptureSlices(iframeWin, slices, Math.max(0, Math.round(w)), Math.max(0, Math.round(h)));
+        } catch (error) {
+          this.renderStatus("长截图拼接失败: " + error.message, true);
+        } finally {
+          scrollContainer.scrollTop = startTop;
+          cleanup();
+          this.renderStatus(slices.length > 1 ? "长截图完成" : "未发生滚动，已保存单页截图");
+        }
       };
       const capture = () => {
         const data = this.captureRegion(iframeWin, x, y, w, h, false);
@@ -1034,14 +1045,15 @@
         event.preventDefault(); event.stopPropagation();
         if (Math.abs(event.deltaY) < 1) return;
         scrollContainer.scrollTop = Math.max(0, scrollContainer.scrollTop + event.deltaY);
-        setTimeout(() => { capture(); lastTop = scrollContainer.scrollTop; }, 180);
+        setTimeout(() => { if (!finished) capture(); }, 180);
         if (idleTimer) clearTimeout(idleTimer);
-        idleTimer = setTimeout(() => this.renderStatus("已记录当前区域，继续滚动或按 Enter 完成"), 450);
+        idleTimer = setTimeout(() => finish(), 900);
       };
       const onKey = (event) => { if (event.key === "Enter") { event.preventDefault(); finish(); } };
       iframeWin.addEventListener("wheel", onWheel, true); iframeWin.addEventListener("keydown", onKey, true);
       capture();
-      this.renderStatus("长截图记录中：继续滚轮滚动，按 Enter 完成，Esc 取消");
+      idleTimer = setTimeout(() => finish(), 1200);
+      this.renderStatus("长截图记录中：继续滚动，停止约 1 秒后自动完成，Esc 取消");
     }
 
     async _stitchCaptureSlices(iframeWin, slices, width, height) {
@@ -1973,6 +1985,13 @@
     pollSelection() {
       try {
         const reader = this.getReader();
+        const activeIframe = this._getReaderIframeWindow(reader);
+        for (const dialog of this.dialogs.values()) {
+          if (dialog._capturingImage && dialog._captureReaderWindow !== activeIframe) {
+            dialog._captureCleanup?.();
+            dialog.renderStatus("已停止截图：阅读器已切换");
+          }
+        }
         const view = reader?._internalReader?._lastView;
         const annotation = view?._annotationPopup?.annotation || view?._selectionPopup?.annotation;
         const text = String(annotation?.text || "").trim();
