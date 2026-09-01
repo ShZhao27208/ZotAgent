@@ -705,10 +705,7 @@
       const captureBtn = createElement(this.doc, "button", "zotagent-small-button", "截图");
       captureBtn.title = "框选 PDF 区域截图";
       captureBtn.addEventListener("click", () => this.startAreaCapture());
-      const longCaptureBtn = createElement(this.doc, "button", "zotagent-small-button", "长截图");
-      longCaptureBtn.title = "框选横向范围后滚动鼠标滚轮拼成长截图";
-      longCaptureBtn.addEventListener("click", () => this.startLongCapture());
-      this.selectionBox.append(this.selectionLabel, captureBtn, longCaptureBtn, this.capturePreview, this.selectionInput, clearSelection);
+      this.selectionBox.append(this.selectionLabel, captureBtn, this.capturePreview, this.selectionInput, clearSelection);
 
       this.messagesElement = createElement(this.doc, "div", "zotagent-messages");
       this.statusElement = createElement(this.doc, "div", "zotagent-status", "就绪");
@@ -896,8 +893,11 @@
       iframeDoc.documentElement.style.MozUserSelect = "none";
 
       let startX = 0, startY = 0, dragging = false;
+      let toolbar = null;
       const cleanup = () => {
         overlay.remove();
+        toolbar?.remove();
+        toolbar = null;
         iframeWin.removeEventListener("pointerdown", blockSelection, true);
         iframeWin.removeEventListener("pointermove", blockSelection, true);
         iframeWin.removeEventListener("pointerup", blockSelection, true);
@@ -943,9 +943,25 @@
         const y = Math.min(e.clientY, startY);
         const w = Math.abs(e.clientX - startX);
         const h = Math.abs(e.clientY - startY);
-        cleanup();
-        if (w < 10 || h < 10) return;
-        this.captureRegion(iframeWin, x, y, w, h);
+        if (w < 10 || h < 10) { cleanup(); return; }
+        toolbar = iframeDoc.createElement("div");
+        toolbar.style.cssText = `position:fixed;z-index:2147483647;left:${x}px;top:${Math.min(iframeWin.innerHeight - 42, y + h + 8)}px;display:flex;gap:6px;padding:5px 7px;background:#fff;border:1px solid #c7d7dc;border-radius:5px;box-shadow:0 3px 12px rgba(0,0,0,.2);font:13px system-ui,sans-serif;`;
+        const makeButton = (label, title, handler, primary = false) => {
+          const button = iframeDoc.createElement("button");
+          button.textContent = label; button.title = title; button.type = "button";
+          button.style.cssText = `min-width:${label === "长截图" ? 58 : 28}px;height:28px;border:1px solid ${primary ? "#159f91" : "#c7d7dc"};border-radius:4px;background:${primary ? "#159f91" : "#fff"};color:${primary ? "#fff" : "#24515a"};cursor:pointer;font-weight:${primary ? 600 : 400};`;
+          button.addEventListener("click", handler);
+          return button;
+        };
+        const cancel = makeButton("×", "取消截图", () => { cleanup(); this.renderStatus("已取消截图"); });
+        const confirm = makeButton("✓", "确认截图", () => { cleanup(); this.captureRegion(iframeWin, x, y, w, h); }, true);
+        const long = makeButton("长截图", "滚动采集并拼成长截图", () => {
+          overlay.remove(); toolbar.remove(); toolbar = null;
+          this._captureLongSlices(iframeWin, iframeDoc.querySelector("#viewerContainer") || iframeDoc.scrollingElement || iframeDoc.documentElement, x, y, w, h, cleanup);
+        });
+        toolbar.append(long, cancel, confirm);
+        (iframeDoc.body || iframeDoc.documentElement).appendChild(toolbar);
+        this.renderStatus("已选定区域：点击 ✓ 确认，点击“长截图”后滚动，× 取消");
       };
       const onEsc = (e) => {
         if (e.key === "Escape") {
