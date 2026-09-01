@@ -724,6 +724,7 @@
       this.requestID = null;
       this.lastProcessError = "";
       this.receiveSelections = Boolean(pref("receiveSelections", true));
+      this.extraItems = [];
       this.runtime = new RuntimeClient(this);
       this.element = this.build();
       this.controller.layer.appendChild(this.element);
@@ -797,6 +798,18 @@
       captureBtn.addEventListener("click", () => this.startAreaCapture());
       this.selectionBox.append(this.selectionLabel, captureBtn, this.capturePreview, this.selectionInput, clearSelection);
 
+      this.refBar = createElement(this.doc, "div", "zotagent-ref-bar");
+      this.fullTextCheckbox = createElement(this.doc, "input");
+      this.fullTextCheckbox.type = "checkbox";
+      this.fullTextCheckbox.id = `${this.id}-fulltext`;
+      const fullTextLabel = createElement(this.doc, "label", "zotagent-fulltext-label", "附加 PDF 全文");
+      fullTextLabel.htmlFor = this.fullTextCheckbox.id;
+      const importBtn = createElement(this.doc, "button", "zotagent-small-button", "导入选中文献");
+      importBtn.title = "将 Zotero 主面板当前选中的条目添加为额外参考文献";
+      importBtn.addEventListener("click", () => this.importSelectedItems());
+      this.extraItemsList = createElement(this.doc, "div", "zotagent-extra-items");
+      this.refBar.append(this.fullTextCheckbox, fullTextLabel, importBtn);
+
       this.messagesElement = createElement(this.doc, "div", "zotagent-messages");
       this.statusElement = createElement(this.doc, "div", "zotagent-status", "就绪");
 
@@ -845,6 +858,8 @@
         executionBar,
         this.contextBar,
         this.selectionBox,
+        this.refBar,
+        this.extraItemsList,
         this.messagesElement,
         this.ptyContainer,
         this.statusElement,
@@ -900,6 +915,55 @@
         this._multiMode = null;
       }
       this.contextBar.title = this.context.attachmentPath || this.context.title || "";
+    }
+
+    importSelectedItems() {
+      const selected = this.controller.win.ZoteroPane?.getSelectedItems?.() || [];
+      const currentId = this.context?.topItem?.id;
+      let added = 0;
+      for (const raw of selected) {
+        const item = raw.isAttachment?.() && raw.parentItemID
+          ? Zotero.Items.get(raw.parentItemID) : raw;
+        if (!item || item.isNote?.()) continue;
+        if (item.id === currentId) continue;
+        if (this.extraItems.some((e) => e.topItem.id === item.id)) continue;
+        const attachment = item.getAttachments?.()[0]
+          ? Zotero.Items.get(item.getAttachments()[0]) : null;
+        this.extraItems.push({
+          title: item.getField("title"),
+          topItem: item,
+          attachment,
+          includeFullText: false,
+        });
+        added++;
+      }
+      if (added) this.renderExtraItems();
+      else this.renderStatus("没有可导入的新文献（已存在或未选择）");
+    }
+
+    renderExtraItems() {
+      this.extraItemsList.replaceChildren();
+      for (let i = 0; i < this.extraItems.length; i++) {
+        const entry = this.extraItems[i];
+        const row = createElement(this.doc, "div", "zotagent-extra-item");
+        const cb = createElement(this.doc, "input");
+        cb.type = "checkbox";
+        cb.checked = entry.includeFullText;
+        cb.title = "附加此文献的 PDF 全文";
+        cb.addEventListener("change", () => { entry.includeFullText = cb.checked; });
+        const titleSpan = createElement(this.doc, "span", "zotagent-extra-title");
+        titleSpan.textContent = entry.title || "未命名";
+        titleSpan.title = entry.title || "";
+        const removeBtn = createElement(this.doc, "button", "zotagent-icon-button", "×");
+        removeBtn.title = "移除";
+        const idx = i;
+        removeBtn.addEventListener("click", () => {
+          this.extraItems.splice(idx, 1);
+          this.renderExtraItems();
+        });
+        row.append(cb, titleSpan, removeBtn);
+        this.extraItemsList.appendChild(row);
+      }
     }
 
     receiveSelection(snapshot) {
@@ -1330,9 +1394,16 @@
 
     buildPrompt(question) {
       const blocks = [];
+      const allItems = [];
       if (this.context) {
         const items = this.context.items || [this.context];
-        const descriptions = items.map((item, index) => {
+        for (const item of items) allItems.push(item);
+      }
+      for (const entry of this.extraItems) {
+        allItems.push({ title: entry.title, topItem: entry.topItem });
+      }
+      if (allItems.length) {
+        const descriptions = allItems.map((item, index) => {
           const parts = [`[S${index + 1}] ${item.title || "未命名文献"}`];
           const topItem = item.topItem;
           if (topItem) {
@@ -1345,10 +1416,14 @@
           }
           return parts.join(" | ");
         });
-        blocks.push("## Zotero 当前文献\n" + descriptions.join("\n"));
+        blocks.push("## Zotero 文献上下文\n" + descriptions.join("\n"));
       }
       if (this.pdfText) {
-        blocks.push("## Zotero PDF 全文\n" + this.pdfText);
+        const label = this.context?.title || "当前文献";
+        blocks.push(`## PDF 全文: ${label}\n` + this.pdfText);
+      }
+      for (const extra of this.extraPdfTexts || []) {
+        blocks.push(`## PDF 全文: ${extra.title}\n` + extra.text);
       }
       if (this.capturedImage) {
         blocks.push("## PDF 截图\n[已附加 PDF 区域截图作为图像上下文]");
@@ -1433,8 +1508,10 @@
       this.updateContext();
 
       this.pdfText = "";
+      this.extraPdfTexts = [];
+      const wantFullText = this.fullTextCheckbox.checked;
       const attachment = this.context?.attachment;
-      if (attachment) {
+      if (wantFullText && attachment) {
         this.renderStatus("正在从 Zotero 提取 PDF 全文...");
         const extracted = await extractPdfText(attachment);
         if (extracted.text) {
@@ -1444,6 +1521,18 @@
             : extracted.text;
         } else {
           this.renderStatus("Zotero 未提取到 PDF 文本，将仅使用选区/截图", true);
+        }
+      }
+
+      for (const entry of this.extraItems) {
+        if (!entry.includeFullText || !entry.attachment) continue;
+        const extracted = await extractPdfText(entry.attachment);
+        if (extracted.text) {
+          const maxChars = 60000;
+          const text = extracted.text.length > maxChars
+            ? `${extracted.text.slice(0, maxChars)}\n\n[已截断]`
+            : extracted.text;
+          this.extraPdfTexts.push({ title: entry.title, text });
         }
       }
 
@@ -1545,6 +1634,7 @@
 
     async sendSeparate(question) {
       const items = this.context.items;
+      const wantFullText = this.fullTextCheckbox.checked;
       this.addMessage("user", `[分别处理 ${items.length} 篇] ${question}`);
       this.promptInput.value = "";
       this.sendButton.disabled = true;
@@ -1566,7 +1656,22 @@
         };
         singleContext.wslPath = windowsToWSLPath(singleContext.attachmentPath);
 
-        const prompt = `## Zotero 当前文献\n${title}\n\n## 用户问题\n${question}`;
+        let fullTextBlock = "";
+        if (wantFullText) {
+          const att = item.topItem?.getAttachments?.()[0]
+            ? Zotero.Items.get(item.topItem.getAttachments()[0]) : null;
+          if (att) {
+            const extracted = await extractPdfText(att);
+            if (extracted.text) {
+              const maxChars = 60000;
+              const text = extracted.text.length > maxChars
+                ? `${extracted.text.slice(0, maxChars)}\n\n[已截断]` : extracted.text;
+              fullTextBlock = `\n\n## PDF 全文: ${title}\n${text}`;
+            }
+          }
+        }
+
+        const prompt = `## Zotero 当前文献\n${title}${fullTextBlock}\n\n## 用户问题\n${question}`;
         const payload = {
           windowID: this.id,
           requestID: this.requestID,
