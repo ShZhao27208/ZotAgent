@@ -4,12 +4,11 @@ import test from "node:test";
 
 const source = await readFile(new URL("../plugin/content/zot-agent.js", import.meta.url), "utf8");
 
-test("PDF selection uses the Zotero popup event and all reader views", () => {
+test("PDF selection uses native popup events and active-view annotations", () => {
   assert.match(source, /registerEventListener\(\s*"renderTextSelectionPopup"/);
   assert.match(source, /unregisterEventListener\("renderTextSelectionPopup"/);
-  assert.match(source, /event\?\.doc/);
-  assert.match(source, /_primaryView\?\._iframeWindow\?\.document/);
-  assert.match(source, /_secondaryView\?\._iframeWindow\?\.document/);
+  assert.match(source, /primaryViewSelectionPopup\?\.annotation/);
+  assert.match(source, /secondaryViewSelectionPopup\?\.annotation/);
 });
 
 test("insert cursor supports PDF annotation popup editors", () => {

@@ -2164,21 +2164,19 @@
       return String(value || "").replace(/\s+/g, " ").trim();
     }
 
-    _selectionFromDocument(doc) {
-      try {
-        return this._normalizeSelectedText(doc?.defaultView?.getSelection?.()?.toString?.());
-      } catch {
-        return "";
-      }
-    }
-
     _readerSelectionCandidates(reader) {
       const internal = reader?._internalReader;
       const state = internal?._state;
-      const primaryFirst = internal?._lastViewPrimary !== false && state?.primary !== false;
-      const primary = [state?.primaryViewSelectionPopup?.annotation, internal?._primaryView?._selectionPopup?.annotation];
-      const secondary = [state?.secondaryViewSelectionPopup?.annotation, internal?._secondaryView?._selectionPopup?.annotation];
-      return primaryFirst ? [...primary, ...secondary] : [...secondary, ...primary];
+      // Never fall back to the other split view: it can retain an old selection.
+      const view = internal?._lastView;
+      const secondary = view && view === internal?._secondaryView
+        ? true
+        : view && view === internal?._primaryView
+          ? false
+          : internal?._lastViewPrimary === false || state?.primary === false;
+      return secondary
+        ? [state?.secondaryViewSelectionPopup?.annotation, internal?._secondaryView?._selectionPopup?.annotation]
+        : [state?.primaryViewSelectionPopup?.annotation, internal?._primaryView?._selectionPopup?.annotation];
     }
 
     _readReaderSelection(reader, event = null) {
@@ -2186,31 +2184,25 @@
       const eventText = this._normalizeSelectedText(
         eventAnnotation?.text || event?.params?.text || event?.params?.selectedText,
       );
-      if (eventText) return { text: eventText, annotation: eventAnnotation };
-
-      const eventDocText = this._selectionFromDocument(event?.doc);
-      if (eventDocText) return { text: eventDocText, annotation: eventAnnotation };
-
-      const internal = reader?._internalReader;
-      const documents = [
-        reader?._iframeWindow?.document,
-        reader?._iframe?.contentDocument,
-        reader?._window?.document,
-        internal?._primaryView?._iframeWindow?.document,
-        internal?._primaryView?._iframe?.contentDocument,
-        internal?._secondaryView?._iframeWindow?.document,
-        internal?._secondaryView?._iframe?.contentDocument,
-      ];
-      for (const doc of documents) {
-        const text = this._selectionFromDocument(doc);
-        if (text) return { text, annotation: eventAnnotation };
+      if (eventText) {
+        // Once native events work for this reader, polling must not overwrite
+        // them with stale popup state (or overwrite the user's manual edits).
+        this._selectionEventReaders ||= new WeakSet();
+        if (reader) this._selectionEventReaders.add(reader);
+        return { text: eventText, annotation: eventAnnotation };
+      }
+      if (reader && this._selectionEventReaders?.has(reader)) {
+        return { text: "", annotation: null };
       }
 
+      // Zotero PDF selections are not necessarily DOM selections. In some
+      // PDFs getSelection() returns unrelated text-layer offsets or old text.
+      // Only use native popup annotations, including on the polling fallback.
       for (const annotation of this._readerSelectionCandidates(reader)) {
         const text = this._normalizeSelectedText(annotation?.text);
         if (text) return { text, annotation };
       }
-      return { text: "", annotation: eventAnnotation };
+      return { text: "", annotation: null };
     }
 
     _publishReaderSelection(reader, text, annotation = null) {
