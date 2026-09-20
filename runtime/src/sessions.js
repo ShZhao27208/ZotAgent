@@ -1,5 +1,6 @@
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { randomUUID } from "node:crypto";
 
 const STORE_DIR = join(
   process.env.HOME || "/tmp",
@@ -21,7 +22,9 @@ function load() {
 
 function save() {
   mkdirSync(dirname(STORE_PATH), { recursive: true });
-  writeFileSync(STORE_PATH, JSON.stringify(cache, null, 2));
+  const tmp = STORE_PATH + "." + randomUUID().slice(0, 8) + ".tmp";
+  writeFileSync(tmp, JSON.stringify(cache, null, 2));
+  renameSync(tmp, STORE_PATH);
 }
 
 export function listSessions(agent) {

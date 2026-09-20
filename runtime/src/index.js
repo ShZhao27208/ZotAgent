@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { loadConfig, resolveClaudePath } from "./config.js";
 import { existsSync } from "node:fs";
 import {
@@ -76,7 +76,7 @@ function saveImageToTemp(dataURL) {
   if (!match) return null;
   const ext = match[1] === "jpeg" ? "jpg" : match[1];
   const buffer = Buffer.from(match[2], "base64");
-  const filename = `capture-${Date.now()}.${ext}`;
+  const filename = `capture-${randomUUID()}.${ext}`;
   const filePath = join(TEMP_DIR, filename);
   writeFileSync(filePath, buffer);
   return filePath;
@@ -175,6 +175,11 @@ function runAgent(request, response) {
 
   child.on("close", (code, signal) => {
     running.delete(request.requestID);
+    for (const file of (request.files || [])) {
+      if (file.includes("/zotero-full-agent/tmp/")) {
+        try { unlinkSync(file); } catch {}
+      }
+    }
     writeEvent(response, envelope(request, "request.completed", {
       code,
       signal,
@@ -425,6 +430,7 @@ server.listen(config.port, config.host, () => {
 
 function shutdown() {
   for (const { child } of running.values()) terminateProcess(child);
+  for (const session of listPtySessions()) closePtySession(session.id);
   server.close(() => process.exit(0));
 }
 

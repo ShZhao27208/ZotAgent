@@ -51,7 +51,12 @@ export function closePtySession(id) {
   const session = ptySessions.get(id);
   if (!session) return false;
   if (session.alive) { try { session.terminal.kill(); } catch {} }
-  session.subscribers.clear(); ptySessions.delete(id); return true;
+  for (const subscriber of session.subscribers) {
+    try { subscriber(null, { exitCode: session.exitCode, signal: "cleanup" }); } catch {}
+  }
+  session.subscribers.clear();
+  ptySessions.delete(id);
+  return true;
 }
 
 export function listPtySessions() {
