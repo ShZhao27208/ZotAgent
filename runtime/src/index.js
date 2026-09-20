@@ -324,6 +324,10 @@ const server = http.createServer(async (request, response) => {
         writeJSON(response, 404, { error: "request not found" });
         return;
       }
+      if (!active.child.stdin.writable) {
+        writeJSON(response, 409, { error: "stdin is closed, approval not supported in this mode" });
+        return;
+      }
       const body = await readJSON(request);
       const input = body.approved ? "y\n" : "n\n";
       try {

@@ -699,12 +699,14 @@
 
     async approve(requestID, approved) {
       try {
-        await fetch(this.endpoint(`/v1/requests/${requestID}/approve`), {
+        return await fetch(this.endpoint(`/v1/requests/${requestID}/approve`), {
           method: "POST",
           headers: this.headers(),
           body: JSON.stringify({ approved }),
         });
-      } catch (_) {}
+      } catch (_) {
+        return null;
+      }
     }
   }
 
@@ -1478,16 +1480,26 @@
       }
       const actions = createElement(this.doc, "div", "zotagent-approval-actions");
       const approveBtn = createElement(this.doc, "button", "zotagent-approve-button", "允许");
-      approveBtn.addEventListener("click", () => {
-        this.runtime.approve(this.requestID, true);
-        this.dismissApproval();
-        this.renderStatus("已批准，Agent 继续执行...");
+      approveBtn.addEventListener("click", async () => {
+        try {
+          const res = await this.runtime.approve(this.requestID, true);
+          this.dismissApproval();
+          this.renderStatus(res?.ok === false ? "审批失败" : "已批准，Agent 继续执行...");
+        } catch {
+          this.dismissApproval();
+          this.renderStatus("审批失败", true);
+        }
       });
       const denyBtn = createElement(this.doc, "button", "zotagent-deny-button", "拒绝");
-      denyBtn.addEventListener("click", () => {
-        this.runtime.approve(this.requestID, false);
-        this.dismissApproval();
-        this.renderStatus("已拒绝工具调用");
+      denyBtn.addEventListener("click", async () => {
+        try {
+          const res = await this.runtime.approve(this.requestID, false);
+          this.dismissApproval();
+          this.renderStatus(res?.ok === false ? "拒绝失败" : "已拒绝工具调用");
+        } catch {
+          this.dismissApproval();
+          this.renderStatus("拒绝失败", true);
+        }
       });
       actions.append(approveBtn, denyBtn);
       container.append(label, actions);
@@ -1599,7 +1611,13 @@
             const tokens = u.input_tokens || u.tokens_used || u.usage?.total_tokens;
             if (tokens) this.renderStatus(`已用 ${tokens} tokens`);
           }
-          if (event.type === "approval.requested") this.showApprovalUI(event);
+          if (event.type === "approval.requested") {
+            if (this._agentCapabilities?.[this.agent]?.supportsApproval) {
+              this.showApprovalUI(event);
+            } else {
+              this.renderStatus("Agent 请求审批，请在原生终端中处理", true);
+            }
+          }
           if (event.type === "process.stderr") {
             const line = event.data?.line || "";
             this.lastProcessError = `${this.lastProcessError || ""}${line}\n`.slice(-4000);
