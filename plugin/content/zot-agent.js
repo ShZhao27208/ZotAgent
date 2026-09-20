@@ -91,14 +91,6 @@
 
     launch() {
       let runtimePath = String(pref("runtimeScriptPath", "")).trim();
-      const currentRuntimePath = "/home/shzhao/AGitRep/SelfRep/ZotAgent/runtime/src/index.js";
-      if (
-        runtimePath === "/mnt/d/AselfRE/ASelfvRep/ZotAgent/runtime/src/index.js" ||
-        runtimePath === "/home/shzhao/ASelfvRep/ASelfvRep/ZotAgent/runtime/src/index.js"
-      ) {
-        runtimePath = currentRuntimePath;
-        setPref("runtimeScriptPath", runtimePath);
-      }
       if (!runtimePath.startsWith("/")) {
         throw new Error("Runtime 脚本路径必须是 WSL 绝对路径");
       }
@@ -768,7 +760,7 @@
 
       const executionBar = createElement(this.doc, "div", "zotagent-execution-bar");
       this.cwdInput = createElement(this.doc, "input", "zotagent-cwd-input");
-      this.cwdInput.value = String(pref("defaultWorkingDirectory", "/home/shzhao"));
+      this.cwdInput.value = String(pref("defaultWorkingDirectory", ""));
       this.cwdInput.placeholder = "WSL 工作目录";
       this.cwdInput.title = "该对话框的 WSL 工作目录";
       executionBar.append(this.cwdInput);
@@ -1551,12 +1543,20 @@
       this.stopButton.disabled = false;
       this.renderStatus("Agent 运行中...");
 
+      const cwd = this.cwdInput.value.trim() || pref("defaultWorkingDirectory", "");
+      if (!cwd) {
+        this.renderStatus("请先设置工作目录 (defaultWorkingDirectory)");
+        this.sendButton.disabled = false;
+        this.stopButton.disabled = true;
+        return;
+      }
+
       const payload = {
         windowID: this.id,
         requestID: this.requestID,
         agent: this.agent,
         nativeSessionID: this.sessions[this.agent] || null,
-        cwd: this.cwdInput.value.trim() || "/home/shzhao",
+        cwd,
         model: this.selectedModel(),
         prompt: this.buildPrompt(question),
         files: [],
@@ -1679,7 +1679,7 @@
           requestID: this.requestID,
           agent: this.agent,
           nativeSessionID: null,
-          cwd: this.cwdInput.value.trim() || "/home/shzhao",
+          cwd: this.cwdInput.value.trim() || pref("defaultWorkingDirectory", ""),
           model: this.selectedModel(),
           prompt,
           files: [],
@@ -1924,7 +1924,7 @@
             headers: this.runtime.headers(),
             body: JSON.stringify({
               agent: this.agent,
-              cwd: this.cwdInput.value.trim() || "/home/shzhao",
+              cwd: this.cwdInput.value.trim() || pref("defaultWorkingDirectory", ""),
               sessionID: this.sessions[this.agent] || null,
               cols: this._terminal.cols,
               rows: this._terminal.rows,

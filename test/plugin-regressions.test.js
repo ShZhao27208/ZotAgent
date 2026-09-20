@@ -57,3 +57,7 @@ test("long capture appends only the newly revealed scroll distance", () => {
   assert.match(source, /const delta = slices\[index\]\.top - slices\[index - 1\]\.top/);
   assert.match(source, /sourceY: images\[index\]\.height - newHeight/);
 });
+
+test("no hardcoded /home/shzhao paths in plugin source", () => {
+  assert.doesNotMatch(source, /\/home\/shzhao/);
+});
