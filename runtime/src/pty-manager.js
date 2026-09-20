@@ -42,7 +42,7 @@ export function resizePtySession(id, cols, rows) {
 export function subscribePtySession(id, listener) {
   const session = ptySessions.get(id);
   if (!session) return null;
-  if (session.output) listener(session.output, session);
+  if (session.output) listener(session.output);
   if (session.alive) session.subscribers.add(listener); else listener(null, session);
   return () => session.subscribers.delete(listener);
 }
