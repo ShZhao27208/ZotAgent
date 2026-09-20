@@ -39,19 +39,20 @@ function fixture() {
   return { manager: plugin.runtimeManager, prefs, calls, sandbox };
 }
 
-test('installed XPI uses build runtime location and safely quotes launch arguments', () => {
+test('installed XPI launches env and Node directly with literal paths and token', () => {
   const { manager, calls, prefs } = fixture();
   manager.launch();
   assert.equal(prefs.get('runtimeScriptPath'), "/home/user/project's folder/runtime/src/index.js");
-  assert.equal(calls[0][2], "--exec");
-  const command = calls[0].at(-1);
-  assert.equal(spawnSync('bash', ['-n', '-c', command]).status, 0);
-  // Replace exec with an argument printer, preserving the actual shell parsing.
-  const executed = spawnSync('bash', ['-c', command.replace('exec "$ZA_NODE"', "printf '%s\\n' \"$ZA_NODE\"")], {
-    env: { HOME: '/nonexistent', PATH: '/usr/bin:/bin' }, encoding: 'utf8',
-  });
-  assert.equal(executed.status, 0);
-  assert.equal(executed.stdout, "/opt/node path/node\n/home/user/project's folder/runtime/src/index.js\n");
+  const args = calls[0];
+  assert.equal(args[2], '--exec');
+  assert.equal(args[3], '/usr/bin/env');
+  assert.equal(args.at(-2), '/opt/node path/node');
+  assert.equal(args.at(-1), "/home/user/project's folder/runtime/src/index.js");
+  assert.ok(!args.includes('bash'));
+  const result = spawnSync(args[3], [...args.slice(4, -2), process.execPath,
+    '-e', 'require("node:fs").writeSync(1,JSON.stringify([process.env.ZOTAGENT_TOKEN,process.env.ZOTAGENT_PORT,process.argv[1]]))', args.at(-1)], { encoding: 'utf8' });
+  assert.equal(result.status, 0);
+  assert.deepEqual(JSON.parse(result.stdout), ["token'with spaces", '24119', args.at(-1)]);
 });
 
 test('connecting detects agents before any dialog exists and concurrent calls share startup', async () => {
@@ -96,7 +97,7 @@ test('saved Linux paths with backslashes and missing root slash are normalized b
   manager.launch();
   assert.equal(prefs.get('runtimeScriptPath'), '/home/user/ZotAgent/runtime/src/index.js');
   assert.equal(prefs.get('runtimeNodePath'), '/home/user/.nvm/versions/node/v24/bin/node');
-  assert.match(calls[0].at(-1), /'\/home\/user\/ZotAgent\/runtime\/src\/index.js'/);
+  assert.equal(calls[0].at(-1), '/home/user/ZotAgent/runtime/src/index.js');
 });
 
 test('an unresponsive health check has a short timeout and proceeds to launch', async () => {
@@ -131,4 +132,59 @@ test('incorrect home directory casing is repaired only when runtime confirms it 
   sandbox.Zotero.HTTP.request = async () => ({ status: 200, response: { defaultCwd: '/home/runtime-user', cwdExists: true } });
   await manager.probe();
   assert.equal(prefs.get('defaultWorkingDirectory'), '/home/Runtime-User');
+});
+
+test('default-port startup failure recovers on an authenticated alternate and saves endpoint', async () => {
+  const { manager, prefs } = fixture();
+  const endpoints = [];
+  manager.probe = async () => 'offline';
+  manager._startAndWait = async () => {
+    endpoints.push(manager.endpoint());
+    if (endpoints.length === 1) throw Object.assign(new Error('unreachable'), { retryPort: true });
+    return { status: 'started' };
+  };
+  const result = await manager._ensureRunning();
+  assert.equal(result.recovered, true);
+  assert.deepEqual(endpoints, ['http://127.0.0.1:24119', 'http://127.0.0.1:24129']);
+  assert.equal(prefs.get('runtimeEndpoint'), endpoints[1]);
+  assert.equal(manager._connectingEndpoint, null);
+});
+
+test('failed or unauthorized fallback does not change saved endpoint', async () => {
+  for (const alternate of ['offline', 'unauthorized']) {
+    const { manager, prefs } = fixture();
+    manager.probe = async () => manager._connectingEndpoint ? alternate : 'offline';
+    manager._startAndWait = async () => { throw Object.assign(new Error('unreachable'), { retryPort: true }); };
+    await assert.rejects(manager._ensureRunning());
+    assert.equal(prefs.has('runtimeEndpoint'), false);
+    assert.equal(manager._connectingEndpoint, null);
+  }
+});
+
+test('custom endpoint port is passed to runtime and is never replaced automatically', async () => {
+  const { manager, prefs, calls } = fixture();
+  prefs.set('runtimeEndpoint', 'http://127.0.0.1:25100');
+  manager.launch();
+  assert.ok(calls[0].includes('ZOTAGENT_PORT=25100'));
+  manager.probe = async () => 'offline';
+  manager._startAndWait = async () => { throw Object.assign(new Error('unreachable'), { retryPort: true }); };
+  await assert.rejects(manager._ensureRunning(), /unreachable/);
+  assert.equal(prefs.get('runtimeEndpoint'), 'http://127.0.0.1:25100');
+});
+
+test('an unauthorized default runtime does not trigger fallback or launch', async () => {
+  const { manager, prefs, calls } = fixture();
+  manager.probe = async () => 'unauthorized';
+  await assert.rejects(manager._ensureRunning(), /Token/);
+  assert.equal(calls.length, 0);
+  assert.equal(prefs.has('runtimeEndpoint'), false);
+});
+
+test('bare Node preference resolves to the build-time absolute path', () => {
+  const { manager, prefs, calls, sandbox } = fixture();
+  prefs.set('runtimeNodePath', 'node');
+  sandbox.Zotero.ZotAgent._runtimeLocation.node = '/opt/nvm/bin/node';
+  manager.launch();
+  assert.equal(prefs.get('runtimeNodePath'), '/opt/nvm/bin/node');
+  assert.equal(calls[0].at(-2), '/opt/nvm/bin/node');
 });

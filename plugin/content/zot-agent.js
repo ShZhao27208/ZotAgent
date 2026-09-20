@@ -70,7 +70,7 @@
     },
 
     endpoint(path = "") {
-      return String(pref("runtimeEndpoint", "http://127.0.0.1:24119"))
+      return String(this._connectingEndpoint || pref("runtimeEndpoint", "http://127.0.0.1:24119"))
         .replace(/\/$/, "") + path;
     },
 
@@ -143,33 +143,42 @@
         throw new Error("未找到 Runtime 源码，请在设置中填写 runtime/src/index.js 的 WSL 绝对路径");
       }
       let nodePath = String(pref("runtimeNodePath", "node")).trim() || "node";
-      if (nodePath !== "node") {
-        nodePath = windowsToWSLPath(nodePath);
-        if (!nodePath.startsWith("/")) {
-          throw new Error("Node.js 路径必须是 WSL 绝对路径");
-        }
+      if (nodePath === "node" && Zotero.ZotAgent?._runtimeLocation?.node) {
+        nodePath = windowsToWSLPath(Zotero.ZotAgent._runtimeLocation.node);
+        setPref("runtimeNodePath", nodePath);
       }
+      if (!nodePath.startsWith("/")) {
+        throw new Error("请填写 WSL Node.js 绝对路径，或使用本机源码构建的安装包");
+      }
+      const endpoint = this.endpoint();
+      const address = endpoint.match(/^http:\/\/(?:127\.0\.0\.1|localhost)(?::(\d+))?$/);
+      const port = Number(address?.[1] || 80);
+      if (!address || port < 1 || port > 65535) {
+        throw new Error("自动启动仅支持 http://127.0.0.1:端口 或 http://localhost:端口");
+      }
+      const nodeDirectory = nodePath.slice(0, nodePath.lastIndexOf("/"));
+      const runtimePathValue = [nodeDirectory, "/usr/local/bin", "/usr/bin", "/bin"].join(":");
       const distro = String(pref("wslDistro", "Ubuntu")).trim() || "Ubuntu";
       const executable = Components.classes["@mozilla.org/file/local;1"]
         .createInstance(Components.interfaces.nsIFile);
       executable.initWithPath("C:\\Windows\\System32\\wsl.exe");
       if (!executable.exists()) throw new Error("未找到 wsl.exe");
 
-      const quote = (value) => "'" + String(value).replace(/'/g, "'\\''") + "'";
-      const location = Zotero.ZotAgent?._runtimeLocation;
-      // Non-interactive WSL shells often skip NVM initialization in .bashrc.
-      const setup = 'export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"; [ ! -s "$NVM_DIR/nvm.sh" ] || . "$NVM_DIR/nvm.sh"; export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"; ';
-      const nodeSetup = nodePath === "node" && location?.node
-        ? `if [ -x ${quote(windowsToWSLPath(location.node))} ]; then ZA_NODE=${quote(windowsToWSLPath(location.node))}; else ZA_NODE=node; fi; `
-        : `ZA_NODE=${quote(nodePath)}; `;
-      const shellCmd = setup + nodeSetup + `export PATH="$(dirname "$ZA_NODE"):$PATH"; ZOTAGENT_TOKEN=${quote(this.token())} exec "$ZA_NODE" ${quote(runtimePath)}`;
       const process = Components.classes["@mozilla.org/process/util;1"]
         .createInstance(Components.interfaces.nsIProcess);
       process.init(executable);
-      const args = ["-d", distro, "--exec", "bash", "-lc", shellCmd];
+      // Pass literal argv directly, as in the known-good September 10 launcher.
+      const args = [
+        "-d", distro, "--exec", "/usr/bin/env",
+        `ZOTAGENT_TOKEN=${this.token()}`, `ZOTAGENT_PORT=${port}`,
+        "ZOTAGENT_HOST=127.0.0.1", `PATH=${runtimePathValue}`,
+        nodePath, runtimePath,
+      ];
+      this._launchProcess = process;
       const observer = {
         observe: (_subject, topic) => {
           runtimeProcesses.delete(process);
+          if (this._launchProcess !== process) return;
           this._launchFailure = topic === "process-failed"
             ? "无法启动 wsl.exe"
             : `WSL Runtime 已退出（退出码 ${process.exitValue}），请检查 Runtime 和 Node.js 路径`;
@@ -197,14 +206,39 @@
         throw new Error("端口上已有 Runtime，但 Token 不匹配；请停止旧 Runtime 后重试");
       }
       if (!force && !pref("autoStartRuntime", true)) return { status: "disabled" };
+      try {
+        return await this._startAndWait();
+      } catch (error) {
+        // Only retry a default local endpoint whose startup could not be reached.
+        if (!error.retryPort || this.endpoint() !== "http://127.0.0.1:24119") throw error;
+        this._connectingEndpoint = "http://127.0.0.1:24129";
+        try {
+          const alternate = await this.probe();
+          if (alternate === "unauthorized") throw new Error("备用端口 24129 已被其他 Token 的 Runtime 占用");
+          const state = alternate === "running" ? { status: "running" } : await this._startAndWait();
+          setPref("runtimeEndpoint", this._connectingEndpoint);
+          Zotero.debug("[ZotAgent] default port unreachable; authenticated connection recovered on 24129");
+          return { ...state, recovered: true };
+        } catch (alternateError) {
+          throw new Error(`24119 连接失败，备用端口也未连接成功: ${alternateError.message}`);
+        } finally {
+          this._connectingEndpoint = null;
+        }
+      }
+    },
+
+    async _startAndWait() {
       this.launch();
       for (let attempt = 0; attempt < 12; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 250));
         if (await this.healthy()) return { status: "started" };
-        if (this._launchFailure) throw new Error(this._launchFailure);
+        if (this._launchFailure) break;
       }
-      throw new Error("Runtime 启动超时，请检查 WSL、Node 和脚本路径");
+      const error = new Error(this._launchFailure || `Runtime 在 ${this.endpoint()} 无响应；可能是 WSL 端口转发异常`);
+      error.retryPort = true;
+      throw error;
     },
+
   };
 
   class SessionHistory {

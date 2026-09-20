@@ -26,3 +26,11 @@
 使用 Windows ProcessStartInfo 调用插件产生的 WSL 启动参数后，进一步复现 `exec: : not found`。`wsl.exe -- bash -lc` 经过默认 shell，提前展开了传给 Bash 的变量。改为 `wsl.exe --exec bash -lc` 后，在独立端口完成了实际 Windows → WSL → Runtime 的鉴权 health 检查，以及 OpenCode 1.18.31、Codex 0.154.0、Claude Code 2.1.278 的可用性检测；测试进程已关闭。
 
 0.3.4 增加有超时的 Zotero HTTP 请求、已保存路径规范化、直接 WSL exec、进程提前退出诊断，以及经 Runtime 确认不存在后才应用的主目录大小写修复。尚未直接操作 Zotero UI 安装新版。
+
+## 以 9 月 20 日前的版本为基准恢复启动方式
+
+用户明确好用基准为 9 月 20 日之前的最近一次提交：`6244597`（9 月 10 日 23:47，0.3.2）。该版使用显式绝对路径和 `wsl.exe → env → Node → Runtime`，没有 Bash 命令拼接。0.3.5 恢复这种参数直传方式，保留本机构建元数据与路径发现。
+
+现场确认另一个独立问题：WSL 内的 24119 能立即返回 HTTP 401，Windows 的相同端口却超时。Windows 监听者是服务多个端口的 wslrelay，单独重启 ZotAgent Runtime 后仍未恢复。为避免影响其他服务，未重启整个 WSL 或 wslrelay。0.3.5 会在默认端口启动仍不可达时尝试 24129，并在通过相同 Token 鉴权后保存 Endpoint。自定义端口不自动切换。
+
+本次已从 Windows 使用插件生成的直接启动参数，在 24129 完成 Runtime health 和三个 CLI 的检测，全部成功；测试 Runtime 随后关闭。端口恢复逻辑的成功、失败、鉴权冲突和自定义端口行为有回归测试。Zotero UI 内安装新版仍需用户执行。

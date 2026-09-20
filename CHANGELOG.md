@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.5 - 2026-09-21
+
+### Fixes
+
+- Restore the September 10 direct `env → Node → Runtime` launch strategy with literal arguments and an explicit Node directory in PATH.
+- Resolve the default Node command to the local build metadata instead of relying on Bash or NVM shell initialization.
+- Pass the configured local Endpoint port to Runtime. Recover an unreachable default port 24119 through 24129, saving the new address only after authentication succeeds. Preserve custom endpoints and report Token conflicts.
+
+### Validation
+
+- Windows launched the direct command on port 24129; authenticated health and all three Agent version checks succeeded.
+- Added tests for literal arguments, absolute Node paths, custom ports, authenticated fallback, and failure rollback.
+
 ## 0.3.4 - 2026-09-21
 
 ### Fixes
