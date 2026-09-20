@@ -1566,7 +1566,7 @@
 
       if (this._requestState !== "preparing") return;
 
-      if (this._multiMode === "separate" && this.context?.items?.length > 1) {
+      if (this._multiMode === "separate" && [this.context, ...this.extraItems].filter(Boolean).length > 1) {
         await this.sendSeparate(question);
         return;
       }
@@ -1610,6 +1610,8 @@
               windowID: requestSnapshot.windowID,
               cwd: requestSnapshot.cwd,
               title: this.contextBar.textContent || "未命名会话",
+              documentKey: this.context?.topItem?.key || null,
+              documentLibraryID: this.context?.topItem?.libraryID ?? null,
             });
           }
           if (event.type === "message.delta" && event.data?.text) {
@@ -1680,15 +1682,20 @@
 
     async sendSeparate(question) {
       const items = [this.context, ...this.extraItems].filter(Boolean);
-      const wantFullText = this.fullTextCheckbox.checked;
       this.addMessage("user", `[分别处理 ${items.length} 篇] ${question}`);
       this.promptInput.value = "";
       this.sendButton.disabled = true;
       this.stopButton.disabled = false;
+      this._batchCancelled = false;
+      let succeeded = 0;
+      let failed = 0;
 
       try { this._requestState = "running";
       for (let i = 0; i < items.length; i++) {
+        if (this._batchCancelled) break;
         const item = items[i];
+        const isPrimary = i === 0 && item === this.context;
+        const useFullText = isPrimary ? this.fullTextCheckbox.checked : !!item.includeFullText;
         const title = item.title || `文献 ${i + 1}`;
         this.renderStatus(`分别处理 (${i + 1}/${items.length}): ${title}`);
         const assistant = this.addMessage("assistant", "");
@@ -1704,7 +1711,7 @@
         singleContext.wslPath = windowsToWSLPath(singleContext.attachmentPath);
 
         let fullTextBlock = "";
-        if (wantFullText) {
+        if (useFullText) {
           const att = item.topItem?.getAttachments?.()[0]
             ? Zotero.Items.get(item.topItem.getAttachments()[0]) : null;
           if (att) {
@@ -1741,18 +1748,27 @@
             }
             if (event.type === "error") this.renderStatus(event.data.message, true);
           });
+          succeeded++;
           if (assistant.item.text && pref("autoSaveNotes", false)) {
             await NoteService.createChildNote(singleContext, assistant.item.text);
           }
         } catch (error) {
+          failed++;
           this.addMessage("assistant", `[${title}] 失败: ${error.message}`);
         }
       } } finally {
       this.requestID = null;
       this._requestState = "idle";
+      this._batchCancelled = false;
       this.sendButton.disabled = false;
       this.stopButton.disabled = true;
-      this.renderStatus(`分别处理完成 (${items.length} 篇)`);
+      const cancelled = items.length - succeeded - failed;
+      this.renderStatus(
+        cancelled > 0
+          ? `分别处理中断: ${succeeded} 成功, ${failed} 失败, ${cancelled} 取消`
+          : `分别处理完成: ${succeeded} 成功, ${failed} 失败`,
+        failed > 0,
+      );
       }
     }
 
@@ -1878,6 +1894,18 @@
       this.element.dataset.agent = entry.agent;
       this.messagesElement.innerHTML = "";
       this.messages = [];
+      if (entry.documentKey && entry.documentLibraryID != null) {
+        try {
+          const item = Zotero.Items.getByLibraryAndKey(entry.documentLibraryID, entry.documentKey);
+          if (item) {
+            this.updateContext(item);
+          } else {
+            this.renderStatus("原始文献已不存在，仅恢复消息", true);
+          }
+        } catch {
+          this.renderStatus("无法恢复文献上下文", true);
+        }
+      }
       if (entry.messages?.length) {
         for (const msg of entry.messages) {
           this.addMessage(msg.role, msg.text);
