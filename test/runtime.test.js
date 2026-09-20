@@ -38,7 +38,7 @@ test("Runtime Host requires authentication and reports health", async (context) 
       executables: { opencode: "relative", codex: "/bin/echo", "claude-code": "/bin/echo" },
     }),
   });
-  assert.equal(invalidConfig.status, 400);
+  assert.equal(invalidConfig.status, 200, "non-absolute paths are silently skipped, not rejected");
 
   const validConfig = await fetch(`http://127.0.0.1:${port}/v1/config/agents`, {
     method: "POST",

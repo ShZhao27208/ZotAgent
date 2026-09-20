@@ -280,11 +280,12 @@ const server = http.createServer(async (request, response) => {
           const str = String(executable).trim();
           if (str) {
             if (!isAbsolute(str)) {
-              throw new Error(`${name} executable must be an absolute path`);
+              process.stderr.write(`[ZotAgent Runtime] skipping non-absolute path for ${name}: ${str}\n`);
+            } else {
+              config.executables[name] = name === "claude-code" && !existsSync(str)
+                ? resolveClaudePath()
+                : str;
             }
-            config.executables[name] = name === "claude-code" && !existsSync(str)
-              ? resolveClaudePath()
-              : str;
           }
         }
         const platform = body.platforms?.[name];

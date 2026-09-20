@@ -33,6 +33,7 @@ async function startup({ rootURI }) {
     rootURI + "content/preferences.js",
     context,
   );
+  Zotero.ZotAgent._rootURI = rootURI;
   await Zotero.ZotAgent.hooks.onStartup();
 }
 

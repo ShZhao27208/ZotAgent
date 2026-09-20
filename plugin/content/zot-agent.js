@@ -89,8 +89,23 @@
 
     async healthy() { return (await this.probe()) === "running"; },
 
+    _autoDetectRuntimePath() {
+      const uri = Zotero.ZotAgent?._rootURI;
+      if (!uri) return "";
+      const pluginDir = rootURIToWSLPath(uri);
+      if (!pluginDir) return "";
+      return pluginDir.replace(/\/content\/?$/, "").replace(/\/plugin\/?$/, "") + "/runtime/src/index.js";
+    },
+
     launch() {
       let runtimePath = String(pref("runtimeScriptPath", "")).trim();
+      if (!runtimePath) {
+        runtimePath = this._autoDetectRuntimePath();
+        if (runtimePath) {
+          Zotero.debug(`[ZotAgent] auto-detected runtime path: ${runtimePath}`);
+          setPref("runtimeScriptPath", runtimePath);
+        }
+      }
       if (!runtimePath.startsWith("/")) {
         throw new Error("Runtime 脚本路径必须是 WSL 绝对路径");
       }
@@ -345,6 +360,19 @@
     const match = normalized.match(/^([A-Za-z]):\/(.*)/);
     if (!match) return winPath;
     return `/mnt/${match[1].toLowerCase()}/${match[2]}`;
+  }
+
+  function rootURIToWSLPath(uri) {
+    if (!uri) return "";
+    let p = decodeURIComponent(uri.replace(/\/$/, ""));
+    if (p.startsWith("file:///")) p = p.slice(7);
+    else if (p.startsWith("file://")) p = p.slice(7);
+    const wslMatch = p.match(/^\/?(?:wsl\.localhost|wsl\$)\/[^/]+\/(.+)/i);
+    if (wslMatch) return "/" + wslMatch[1];
+    const driveMatch = p.match(/^\/?([A-Za-z]):\/(.*)/);
+    if (driveMatch) return `/mnt/${driveMatch[1].toLowerCase()}/${driveMatch[2]}`;
+    if (p.startsWith("/")) return p;
+    return "";
   }
 
   function readPosition(annotation) {
@@ -603,33 +631,47 @@
         const opencode = String(pref("opencodePath", "")).trim();
         const codex = String(pref("codexPath", "")).trim();
         const claude = String(pref("claudePath", "")).trim();
-        if (opencode) executables.opencode = opencode;
-        if (codex) executables.codex = codex;
-        if (claude) executables["claude-code"] = claude;
+        if (opencode && opencode.startsWith("/")) executables.opencode = opencode;
+        if (codex && codex.startsWith("/")) executables.codex = codex;
+        if (claude && claude.startsWith("/")) executables["claude-code"] = claude;
         const opP = String(pref("opencodePlatform", "wsl"));
         const cxP = String(pref("codexPlatform", "wsl"));
         const clP = String(pref("claudePlatform", "wsl"));
         if (opP) platforms.opencode = opP;
         if (cxP) platforms.codex = cxP;
         if (clP) platforms["claude-code"] = clP;
-        if (!Object.keys(executables).length && !Object.keys(platforms).length) return;
-        const response = await Promise.race([
-          fetch(this.endpoint("/v1/config/agents"), {
-            method: "POST",
-            headers: this.headers(),
-            body: JSON.stringify({ executables, platforms }),
-          }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000)),
-        ]);
-        if (!response.ok) {
-          Zotero.debug(`[ZotAgent] syncAgentPaths failed: ${response.status}`);
+        if (!Object.keys(executables).length && !Object.keys(platforms).length) {
+          // skip POST, go straight to fetching detected paths
+        } else {
+          const response = await Promise.race([
+            fetch(this.endpoint("/v1/config/agents"), {
+              method: "POST",
+              headers: this.headers(),
+              body: JSON.stringify({ executables, platforms }),
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000)),
+          ]);
+          if (!response.ok) {
+            Zotero.debug(`[ZotAgent] syncAgentPaths failed: ${response.status}`);
+          }
         }
       } catch (error) {
         Zotero.debug(`[ZotAgent] syncAgentPaths error: ${error.message}`);
       }
       try {
         const agentsRes = await fetch(this.endpoint("/v1/agents"), { headers: this.headers() });
-        if (agentsRes.ok) this.dialog._agentCapabilities = await agentsRes.json();
+        if (agentsRes.ok) {
+          const agents = await agentsRes.json();
+          this.dialog._agentCapabilities = agents;
+          const prefMap = { opencode: "opencodePath", codex: "codexPath", "claude-code": "claudePath" };
+          for (const [name, info] of Object.entries(agents)) {
+            if (!info.executable || !prefMap[name]) continue;
+            const current = String(pref(prefMap[name], "")).trim();
+            if (!current || !current.startsWith("/")) {
+              setPref(prefMap[name], info.executable);
+            }
+          }
+        }
       } catch {}
     }
 
