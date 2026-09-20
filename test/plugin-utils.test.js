@@ -62,6 +62,14 @@ test("windowsToWSLPath converts uppercase drive letter", () => {
   assert.equal(windowsToWSLPath("D:\\Data\\file.txt"), "/mnt/d/Data/file.txt");
 });
 
+test("windowsToWSLPath converts wsl.localhost UNC path", () => {
+  assert.equal(windowsToWSLPath("\\\\wsl.localhost\\Ubuntu\\home\\user\\project"), "/home/user/project");
+});
+
+test("windowsToWSLPath converts wsl$ UNC path", () => {
+  assert.equal(windowsToWSLPath("\\\\wsl$\\Ubuntu\\home\\user\\project"), "/home/user/project");
+});
+
 test("windowsToWSLPath passes through non-Windows paths", () => {
   assert.equal(windowsToWSLPath("/home/user"), "/home/user");
 });

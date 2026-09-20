@@ -106,18 +106,27 @@
           setPref("runtimeScriptPath", runtimePath);
         }
       }
+      runtimePath = windowsToWSLPath(runtimePath);
       if (!runtimePath.startsWith("/")) {
         throw new Error("Runtime 脚本路径必须是 WSL 绝对路径");
       }
-      const nodePath = String(pref("runtimeNodePath", "node")).trim() || "node";
-      if (nodePath !== "node" && !nodePath.startsWith("/")) {
-        throw new Error("Node.js 路径必须是 WSL 绝对路径");
+      let nodePath = String(pref("runtimeNodePath", "node")).trim() || "node";
+      if (nodePath !== "node") {
+        nodePath = windowsToWSLPath(nodePath);
+        if (!nodePath.startsWith("/")) {
+          throw new Error("Node.js 路径必须是 WSL 绝对路径");
+        }
       }
       const nodeDirectory = nodePath.startsWith("/")
         ? nodePath.replace(/\/[^/]+$/, "")
         : "";
+      const homeDir = runtimePath.match(/^(\/home\/[^/]+)/)?.[1] || "";
+      const nvmPaths = homeDir
+        ? [`${homeDir}/.nvm/versions/node/*/bin`, `${homeDir}/.local/bin`]
+        : [];
       const runtimePathValue = [
         nodeDirectory,
+        ...nvmPaths,
         "/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin",
       ].filter(Boolean).join(":");
       const distro = String(pref("wslDistro", "Ubuntu")).trim() || "Ubuntu";
@@ -357,6 +366,8 @@
   function windowsToWSLPath(winPath) {
     if (!winPath || typeof winPath !== "string") return "";
     const normalized = winPath.replace(/\\/g, "/");
+    const wslMatch = normalized.match(/^(?:\/\/)?(?:wsl\.localhost|wsl\$)\/[^/]+\/(.+)/i);
+    if (wslMatch) return "/" + wslMatch[1];
     const match = normalized.match(/^([A-Za-z]):\/(.*)/);
     if (!match) return winPath;
     return `/mnt/${match[1].toLowerCase()}/${match[2]}`;
