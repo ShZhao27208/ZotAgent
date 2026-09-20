@@ -627,6 +627,10 @@
       } catch (error) {
         Zotero.debug(`[ZotAgent] syncAgentPaths error: ${error.message}`);
       }
+      try {
+        const agentsRes = await fetch(this.endpoint("/v1/agents"), { headers: this.headers() });
+        if (agentsRes.ok) this.dialog._agentCapabilities = await agentsRes.json();
+      } catch {}
     }
 
     async run(payload, onEvent) {
@@ -1420,7 +1424,10 @@
         blocks.push(`## PDF 全文: ${extra.title}\n` + extra.text);
       }
       if (this.capturedImage) {
-        blocks.push("## PDF 截图\n[已附加 PDF 区域截图作为图像上下文]");
+        const canPassImage = this._agentCapabilities?.[this.agent]?.supportsImages;
+        blocks.push(canPassImage
+          ? "## PDF 截图\n[已附加 PDF 区域截图作为图像上下文]"
+          : "## PDF 截图\n[注意: 当前 Agent 不支持图像输入，截图未传递]");
       }
       if (this.selectionInput.value.trim()) {
         const pageInfo = this.selectionLabel.textContent !== "PDF 选区"

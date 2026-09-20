@@ -261,7 +261,12 @@ const server = http.createServer(async (request, response) => {
       const entries = await Promise.all(
         Object.entries(adapters).map(async ([name, adapter]) => [
           name,
-          { ...(await collectVersion(adapter)), platform: adapter.platform },
+          {
+            ...(await collectVersion(adapter)),
+            platform: adapter.platform,
+            supportsImages: adapter.supportsImages,
+            supportsApproval: adapter.supportsApproval,
+          },
         ]),
       );
       writeJSON(response, 200, Object.fromEntries(entries));

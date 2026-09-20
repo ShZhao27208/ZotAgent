@@ -14,6 +14,9 @@ export class AgentAdapter {
     return args;
   }
 
+  get supportsImages() { return false; }
+  get supportsApproval() { return false; }
+
   interactiveArgs(sessionID, cwd) {
     return { args: [], cwd };
   }

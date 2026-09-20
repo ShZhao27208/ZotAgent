@@ -29,6 +29,8 @@ export class ClaudeAdapter extends AgentAdapter {
     };
   }
 
+  get supportsImages() { return true; }
+
   interactiveArgs(sessionID, cwd) {
     // Start the native TUI directly. Structured-session IDs are not guaranteed
     // to be resumable by an interactive Claude process.

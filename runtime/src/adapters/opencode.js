@@ -19,6 +19,8 @@ export class OpenCodeAdapter extends AgentAdapter {
     };
   }
 
+  get supportsImages() { return true; }
+
   interactiveArgs(sessionID, cwd) {
     // Top-level OpenCode uses the optional project positional argument. The
     // --dir flag belongs to `run` and makes the TUI print help/exit 1.

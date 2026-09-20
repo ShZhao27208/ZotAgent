@@ -18,6 +18,7 @@ export class CodexAdapter extends AgentAdapter {
       if (request.model) args.push("--model", request.model);
       args.push("-");
     }
+    for (const file of request.files || []) args.push("--image", file);
     return {
       command: this.executable,
       args,
@@ -26,6 +27,8 @@ export class CodexAdapter extends AgentAdapter {
       nativeSessionID: request.nativeSessionID || null,
     };
   }
+
+  get supportsImages() { return true; }
 
   interactiveArgs(sessionID, cwd) {
     const args = ["--cd", cwd];

@@ -51,3 +51,26 @@ test("native terminals start top-level interactive clients", () => {
   assert.deepEqual(adapters.opencode.interactiveArgs("session-1", request.cwd).args, [request.cwd]);
   assert.deepEqual(adapters["claude-code"].interactiveArgs("session-1", request.cwd).args, []);
 });
+
+test("Codex adapter passes --image for request files", () => {
+  const withFiles = { ...request, files: ["/tmp/capture.png", "/tmp/other.png"] };
+  const invocation = adapters.codex.buildInvocation(withFiles);
+  const imageIndex = invocation.args.indexOf("--image");
+  assert.ok(imageIndex !== -1, "expected --image flag in args");
+  assert.equal(invocation.args[imageIndex + 1], "/tmp/capture.png");
+  const secondIndex = invocation.args.indexOf("--image", imageIndex + 1);
+  assert.ok(secondIndex !== -1, "expected second --image flag");
+  assert.equal(invocation.args[secondIndex + 1], "/tmp/other.png");
+});
+
+test("capability flags: Codex, OpenCode, and Claude support images", () => {
+  assert.equal(adapters.codex.supportsImages, true);
+  assert.equal(adapters.opencode.supportsImages, true);
+  assert.equal(adapters["claude-code"].supportsImages, true);
+});
+
+test("no adapter claims approval support", () => {
+  assert.equal(adapters.codex.supportsApproval, false);
+  assert.equal(adapters.opencode.supportsApproval, false);
+  assert.equal(adapters["claude-code"].supportsApproval, false);
+});
