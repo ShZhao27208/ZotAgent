@@ -720,6 +720,7 @@
       this.sessions = Object.create(null);
       this.messages = [];
       this.requestID = null;
+      this._requestState = "idle";
       this.lastProcessError = "";
       this.receiveSelections = Boolean(pref("receiveSelections", true));
       this.extraItems = [];
@@ -751,6 +752,11 @@
         agent.appendChild(option);
       }
       agent.addEventListener("change", () => {
+        if (this._requestState !== "idle") {
+          agent.value = this.agent;
+          this.renderStatus("请求进行中，无法切换 Agent");
+          return;
+        }
         this.agent = agent.value;
         root.dataset.agent = this.agent;
         this.renderStatus("已切换 Agent，原会话保持独立");
@@ -1517,7 +1523,16 @@
 
     async send() {
       const question = this.promptInput.value.trim();
-      if (!question || this.requestID) return;
+      if (!question || this._requestState !== "idle") return;
+      this._requestState = "preparing";
+      this.requestID = `${this.id}-${Date.now()}`;
+      const requestSnapshot = {
+        agent: this.agent,
+        cwd: this.cwdInput.value.trim() || pref("defaultWorkingDirectory", ""),
+        windowID: this.id,
+      };
+      this.sendButton.disabled = true;
+      this.stopButton.disabled = false;
       this.updateContext();
 
       this.pdfText = "";
@@ -1549,6 +1564,8 @@
         }
       }
 
+      if (this._requestState !== "preparing") return;
+
       if (this._multiMode === "separate" && this.context?.items?.length > 1) {
         await this.sendSeparate(question);
         return;
@@ -1557,25 +1574,23 @@
       this.addMessage("user", question);
       const assistant = this.addMessage("assistant", "");
       this.promptInput.value = "";
-      this.requestID = `${this.id}-${Date.now()}`;
-      this.sendButton.disabled = true;
-      this.stopButton.disabled = false;
       this.renderStatus("Agent 运行中...");
 
-      const cwd = this.cwdInput.value.trim() || pref("defaultWorkingDirectory", "");
-      if (!cwd) {
+      if (!requestSnapshot.cwd) {
         this.renderStatus("请先设置工作目录 (defaultWorkingDirectory)");
         this.sendButton.disabled = false;
         this.stopButton.disabled = true;
+        this._requestState = "idle";
+        this.requestID = null;
         return;
       }
 
       const payload = {
-        windowID: this.id,
+        windowID: requestSnapshot.windowID,
         requestID: this.requestID,
-        agent: this.agent,
-        nativeSessionID: this.sessions[this.agent] || null,
-        cwd,
+        agent: requestSnapshot.agent,
+        nativeSessionID: this.sessions[requestSnapshot.agent] || null,
+        cwd: requestSnapshot.cwd,
         model: this.selectedModel(),
         prompt: this.buildPrompt(question),
         files: [],
@@ -1583,15 +1598,17 @@
       };
 
       try {
+        this._requestState = "running";
+        let requestSucceeded = false;
         await this.runtime.run(payload, (event) => {
           if (event.windowID !== this.id || event.requestID !== this.requestID) return;
           if (event.type === "session.updated" && event.nativeSessionID) {
-            this.sessions[this.agent] = event.nativeSessionID;
+            this.sessions[requestSnapshot.agent] = event.nativeSessionID;
             SessionHistory.upsert({
-              agent: this.agent,
+              agent: requestSnapshot.agent,
               nativeSessionID: event.nativeSessionID,
-              windowID: this.id,
-              cwd: this.cwdInput.value.trim(),
+              windowID: requestSnapshot.windowID,
+              cwd: requestSnapshot.cwd,
               title: this.contextBar.textContent || "未命名会话",
             });
           }
@@ -1625,12 +1642,13 @@
           }
           if (event.type === "error") this.renderStatus(event.data.message, true);
           if (event.type === "request.completed") {
-            const failed = event.data.code !== 0;
+            requestSucceeded = event.data.code === 0;
+            const failed = !requestSucceeded;
             const detail = event.data.stderr || this.lastProcessError;
             this.renderStatus(failed && detail ? `退出码 ${event.data.code}: ${detail.trim().split(/\r?\n/).at(-1)}` : (failed ? `退出码 ${event.data.code}` : "完成"), failed);
           }
         });
-        const answer = this.lastAnswer();
+        const answer = requestSucceeded ? assistant.item.text : "";
         if (answer && pref("autoInsertAtCursor", false)) {
           const inserted = NoteService.insertAtActiveCursor(answer);
           if (!inserted) this.renderStatus(NoteService.lastInsertError, true);
@@ -1639,10 +1657,10 @@
           await NoteService.createChildNote(this.context, answer);
           this.renderStatus("完成并已自动保存子笔记");
         }
-        if (this.sessions[this.agent]) {
+        if (this.sessions[requestSnapshot.agent]) {
           SessionHistory.updateMessages(
-            this.agent,
-            this.sessions[this.agent],
+            requestSnapshot.agent,
+            this.sessions[requestSnapshot.agent],
             this.messages.map((m) => ({ role: m.role, text: m.text })),
           );
         }
@@ -1654,6 +1672,7 @@
         }
       } finally {
         this.requestID = null;
+        this._requestState = "idle";
         this.sendButton.disabled = false;
         this.stopButton.disabled = true;
       }
@@ -1667,7 +1686,8 @@
       this.sendButton.disabled = true;
       this.stopButton.disabled = false;
 
-      try { for (let i = 0; i < items.length; i++) {
+      try { this._requestState = "running";
+      for (let i = 0; i < items.length; i++) {
         const item = items[i];
         const title = item.title || `文献 ${i + 1}`;
         this.renderStatus(`分别处理 (${i + 1}/${items.length}): ${title}`);
@@ -1729,6 +1749,7 @@
         }
       } } finally {
       this.requestID = null;
+      this._requestState = "idle";
       this.sendButton.disabled = false;
       this.stopButton.disabled = true;
       this.renderStatus(`分别处理完成 (${items.length} 篇)`);
@@ -1736,6 +1757,16 @@
     }
 
     async stop() {
+      if (this._requestState === "idle") return;
+      this._batchCancelled = true;
+      if (this._requestState === "preparing") {
+        this._requestState = "idle";
+        this.requestID = null;
+        this.sendButton.disabled = false;
+        this.stopButton.disabled = true;
+        this.renderStatus("已取消");
+        return;
+      }
       if (!this.requestID) return;
       const requestID = this.requestID;
       this.renderStatus("正在停止...");
