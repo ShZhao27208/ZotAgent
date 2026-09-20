@@ -29,6 +29,14 @@ test("Runtime Host requires authentication and reports health", async (context) 
   const health = await response.json();
   assert.equal(health.status, "ok");
   assert.ok(path.isAbsolute(health.defaultCwd));
+  const cwdHealth = await fetch(`http://127.0.0.1:${port}/v1/health?cwd=${encodeURIComponent(root)}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  assert.equal((await cwdHealth.json()).cwdExists, true);
+  const missingCwdHealth = await fetch(`http://127.0.0.1:${port}/v1/health?cwd=/zotagent-no-such-directory`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  assert.equal((await missingCwdHealth.json()).cwdExists, false);
 
   const invalidConfig = await fetch(`http://127.0.0.1:${port}/v1/config/agents`, {
     method: "POST",

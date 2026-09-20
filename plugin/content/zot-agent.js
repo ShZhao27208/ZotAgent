@@ -74,14 +74,36 @@
         .replace(/\/$/, "") + path;
     },
 
+    async request(path, options = {}, timeout = 8000) {
+      const xhr = await Zotero.HTTP.request(options.method || "GET", this.endpoint(path), {
+        headers: { authorization: `Bearer ${this.token()}`, "content-type": "application/json" },
+        body: options.body,
+        responseType: "json",
+        successCodes: false,
+        timeout,
+        logBodyLength: 0,
+        errorDelayMax: 0,
+      });
+      return { ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, json: async () => xhr.response };
+    },
+
+    normalizePaths() {
+      for (const name of ["runtimeScriptPath", "runtimeNodePath", "defaultWorkingDirectory", "opencodePath", "codexPath", "claudePath"]) {
+        const current = String(pref(name, "")).trim();
+        const normalized = windowsToWSLPath(current);
+        if (current && current !== normalized) setPref(name, normalized);
+      }
+    },
+
     async probe() {
       try {
-        const response = await fetch(this.endpoint("/v1/health"), {
-          headers: { authorization: `Bearer ${this.token()}` },
-        });
+        this.normalizePaths();
+        const cwd = String(pref("defaultWorkingDirectory", "")).trim();
+        const response = await this.request("/v1/health?cwd=" + encodeURIComponent(cwd), {}, 1500);
         if (response.ok) {
           const health = await response.json();
-          if (!String(pref("defaultWorkingDirectory", "")).trim() && health.defaultCwd?.startsWith("/")) {
+          const incorrectHomeCase = health.cwdExists === false && cwd.toLowerCase() === health.defaultCwd?.toLowerCase();
+          if ((!cwd || incorrectHomeCase) && health.defaultCwd?.startsWith("/")) {
             setPref("defaultWorkingDirectory", health.defaultCwd);
           }
           return "running";
@@ -106,6 +128,8 @@
     },
 
     launch() {
+      this.normalizePaths();
+      this._launchFailure = null;
       let runtimePath = String(pref("runtimeScriptPath", "")).trim();
       if (!runtimePath) {
         runtimePath = this._autoDetectRuntimePath();
@@ -142,9 +166,14 @@
       const process = Components.classes["@mozilla.org/process/util;1"]
         .createInstance(Components.interfaces.nsIProcess);
       process.init(executable);
-      const args = ["-d", distro, "--", "bash", "-lc", shellCmd];
+      const args = ["-d", distro, "--exec", "bash", "-lc", shellCmd];
       const observer = {
-        observe() { runtimeProcesses.delete(process); },
+        observe: (_subject, topic) => {
+          runtimeProcesses.delete(process);
+          this._launchFailure = topic === "process-failed"
+            ? "无法启动 wsl.exe"
+            : `WSL Runtime 已退出（退出码 ${process.exitValue}），请检查 Runtime 和 Node.js 路径`;
+        },
       };
       runtimeProcesses.add(process);
       const run = process.runwAsync || process.runAsync;
@@ -169,9 +198,10 @@
       }
       if (!force && !pref("autoStartRuntime", true)) return { status: "disabled" };
       this.launch();
-      for (let attempt = 0; attempt < 30; attempt++) {
+      for (let attempt = 0; attempt < 12; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 250));
         if (await this.healthy()) return { status: "started" };
+        if (this._launchFailure) throw new Error(this._launchFailure);
       }
       throw new Error("Runtime 启动超时，请检查 WSL、Node 和脚本路径");
     },
@@ -379,7 +409,11 @@
     const wslMatch = normalized.match(/^(?:\/\/)?(?:wsl\.localhost|wsl\$)\/[^/]+\/(.+)/i);
     if (wslMatch) return "/" + wslMatch[1];
     const match = normalized.match(/^([A-Za-z]):\/(.*)/);
-    if (!match) return winPath;
+    if (!match) {
+      // Recover Linux paths pasted with Windows separators and a missing leading slash.
+      if (/^home\/[^/]+(?:\/|$)/.test(normalized)) return "/" + normalized;
+      return normalized;
+    }
     return `/mnt/${match[1].toLowerCase()}/${match[2]}`;
   }
 
@@ -664,14 +698,10 @@
         if (!Object.keys(executables).length && !Object.keys(platforms).length) {
           // skip POST, go straight to fetching detected paths
         } else {
-          const response = await Promise.race([
-            fetch(this.endpoint("/v1/config/agents"), {
-              method: "POST",
-              headers: this.headers(),
-              body: JSON.stringify({ executables, platforms }),
-            }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000)),
-          ]);
+          const response = await RuntimeManager.request("/v1/config/agents", {
+            method: "POST",
+            body: JSON.stringify({ executables, platforms }),
+          }, 5000);
           if (!response.ok) {
             Zotero.debug(`[ZotAgent] syncAgentPaths failed: ${response.status}`);
           }
@@ -680,7 +710,8 @@
         Zotero.debug(`[ZotAgent] syncAgentPaths error: ${error.message}`);
       }
       try {
-        const agentsRes = await fetch(this.endpoint("/v1/agents"), { headers: this.headers() });
+        const agentsRes = await RuntimeManager.request("/v1/agents");
+        if (!agentsRes.ok) throw new Error(`Runtime ${agentsRes.status}`);
         if (agentsRes.ok) {
           const agents = await agentsRes.json();
           if (this.dialog) this.dialog._agentCapabilities = agents;
@@ -693,7 +724,9 @@
             }
           }
         }
-      } catch {}
+      } catch (error) {
+        throw new Error("Agent 自动检测失败: " + error.message);
+      }
     }
 
     async run(payload, onEvent) {

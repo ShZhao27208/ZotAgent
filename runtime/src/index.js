@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 import { writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { loadConfig, resolveClaudePath } from "./config.js";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import {
   envelope,
   isAuthorized,
@@ -250,8 +250,15 @@ const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://${config.host}:${config.port}`);
     if (request.method === "GET" && url.pathname === "/v1/health") {
+      let cwdExists = null;
+      const requestedCwd = url.searchParams.get("cwd");
+      if (requestedCwd) {
+        try { cwdExists = isAbsolute(requestedCwd) && statSync(requestedCwd).isDirectory(); }
+        catch { cwdExists = false; }
+      }
       writeJSON(response, 200, {
         status: "ok",
+        cwdExists,
         pid: process.pid,
         runningRequests: running.size,
         defaultCwd: config.defaultCwd,

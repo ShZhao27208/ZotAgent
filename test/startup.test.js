@@ -15,7 +15,13 @@ function fixture() {
     Zotero: { Prefs: {
       get: key => prefs.get(key.replace('extensions.zotagent.', '')),
       set: (key, value) => prefs.set(key.replace('extensions.zotagent.', ''), value),
-    }, debug() {} },
+    }, debug() {}, HTTP: { request: async (_method, url, options) => {
+      assert.ok(options.timeout > 0);
+      return { status: 200, response: url.endsWith('/v1/agents') ? {
+        codex: { available: true, executable: '/opt/codex' },
+        'claude-code': { available: true, executable: '/opt/claude' },
+      } : { defaultCwd: '/home/runtime-user', cwdExists: false } };
+    } } },
     Components: { interfaces: {}, classes: {
       '@mozilla.org/file/local;1': { createInstance: () => ({ initWithPath() {}, exists: () => true }) },
       '@mozilla.org/process/util;1': { createInstance: () => ({ init() {}, runwAsync: args => calls.push(args) }) },
@@ -30,13 +36,14 @@ function fixture() {
   const plugin = sandbox.Zotero.ZotAgent;
   plugin._rootURI = 'jar:file:///C:/Users/test/extensions/zotagent.xpi!/';
   plugin._runtimeLocation = { script: "/home/user/project's folder/runtime/src/index.js" };
-  return { manager: plugin.runtimeManager, prefs, calls };
+  return { manager: plugin.runtimeManager, prefs, calls, sandbox };
 }
 
 test('installed XPI uses build runtime location and safely quotes launch arguments', () => {
   const { manager, calls, prefs } = fixture();
   manager.launch();
   assert.equal(prefs.get('runtimeScriptPath'), "/home/user/project's folder/runtime/src/index.js");
+  assert.equal(calls[0][2], "--exec");
   const command = calls[0].at(-1);
   assert.equal(spawnSync('bash', ['-n', '-c', command]).status, 0);
   // Replace exec with an argument printer, preserving the actual shell parsing.
@@ -80,4 +87,48 @@ test('healthy runtime supplies a missing working directory and preserves an expl
   prefs.set('defaultWorkingDirectory', '/work/my-project');
   await manager.probe();
   assert.equal(prefs.get('defaultWorkingDirectory'), '/work/my-project');
+});
+
+test('saved Linux paths with backslashes and missing root slash are normalized before launch', () => {
+  const { manager, prefs, calls } = fixture();
+  prefs.set('runtimeScriptPath', String.raw`home\user\ZotAgent\runtime\src\index.js`);
+  prefs.set('runtimeNodePath', String.raw`home\user\.nvm\versions\node\v24\bin\node`);
+  manager.launch();
+  assert.equal(prefs.get('runtimeScriptPath'), '/home/user/ZotAgent/runtime/src/index.js');
+  assert.equal(prefs.get('runtimeNodePath'), '/home/user/.nvm/versions/node/v24/bin/node');
+  assert.match(calls[0].at(-1), /'\/home\/user\/ZotAgent\/runtime\/src\/index.js'/);
+});
+
+test('an unresponsive health check has a short timeout and proceeds to launch', async () => {
+  const { manager, sandbox } = fixture();
+  let launches = 0;
+  sandbox.Zotero.HTTP.request = async (_method, _url, options) => {
+    assert.equal(options.timeout, 1500);
+    throw new Error('timeout');
+  };
+  manager.launch = () => launches++;
+  manager.healthy = async () => true;
+  assert.equal((await manager._ensureRunning()).status, 'started');
+  assert.equal(launches, 1);
+});
+
+test('failed CLI detection rejects and releases pending connection for retry', async () => {
+  const { manager, sandbox } = fixture();
+  sandbox.Zotero.HTTP.request = async (_method, url) => {
+    if (url.endsWith('/v1/agents')) throw new Error('timeout');
+    return { status: 200, response: { defaultCwd: '/home/runtime-user' } };
+  };
+  await assert.rejects(manager.ensureRunning(), /Agent 自动检测失败: timeout/);
+  assert.equal(manager._pending, null);
+});
+
+test('incorrect home directory casing is repaired only when runtime confirms it does not exist', async () => {
+  const { manager, prefs, sandbox } = fixture();
+  prefs.set('defaultWorkingDirectory', '/home/Runtime-User');
+  await manager.probe();
+  assert.equal(prefs.get('defaultWorkingDirectory'), '/home/runtime-user');
+  prefs.set('defaultWorkingDirectory', '/home/Runtime-User');
+  sandbox.Zotero.HTTP.request = async () => ({ status: 200, response: { defaultCwd: '/home/runtime-user', cwdExists: true } });
+  await manager.probe();
+  assert.equal(prefs.get('defaultWorkingDirectory'), '/home/Runtime-User');
 });

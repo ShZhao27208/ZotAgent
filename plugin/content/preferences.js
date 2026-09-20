@@ -19,26 +19,13 @@
     return el.localName === "checkbox" || (el.localName === "input" && el.type === "checkbox");
   }
 
-  function runtimeHeaders() {
-    return {
-      authorization: "Bearer " + String(get("runtimeToken") || ""),
-      "content-type": "application/json",
-    };
-  }
-
-  function runtimeEndpoint(path) {
-    return String(get("runtimeEndpoint") || "").replace(/\/$/, "") + path;
-  }
-
   async function testAgent(doc, agentName) {
     const result = doc.querySelector("#zotagent-agent-result");
     result.textContent = `正在检测 ${agentName}...`;
     try {
       await Zotero.ZotAgent.runtimeManager.ensureRunning(true);
       refreshDetectedFields(doc);
-      const response = await fetch(runtimeEndpoint("/v1/agents"), {
-        headers: runtimeHeaders(),
-      });
+      const response = await Zotero.ZotAgent.runtimeManager.request("/v1/agents");
       if (!response.ok) throw new Error(`Runtime ${response.status}`);
       const agents = await response.json();
       const info = agents[agentName];
@@ -80,6 +67,7 @@
 
   function load(win) {
     const doc = win.document;
+    Zotero.ZotAgent.runtimeManager.normalizePaths();
     for (const element of doc.querySelectorAll("[data-pref]")) {
       const name = element.dataset.pref;
       const value = get(name);
@@ -139,18 +127,14 @@
         await Zotero.ZotAgent.runtimeManager.ensureRunning(true);
         refreshDetectedFields(doc);
 
-        const response = await fetch(runtimeEndpoint("/v1/agents"), {
-          headers: runtimeHeaders(),
-        });
+        const response = await Zotero.ZotAgent.runtimeManager.request("/v1/agents");
         if (!response.ok) throw new Error(`Runtime ${response.status}`);
         const agents = await response.json();
         const lines = Object.entries(agents).map(
           ([name, status]) => `${name}: ${status.available ? "✓ " + status.version : "✗ " + (status.error || "不可用")}`,
         );
 
-        const health = await fetch(runtimeEndpoint("/v1/health"), {
-          headers: runtimeHeaders(),
-        });
+        const health = await Zotero.ZotAgent.runtimeManager.request("/v1/health");
         if (health.ok) {
           const hData = await health.json();
           lines.unshift(`Runtime: ✓ PID ${hData.pid}, 活跃请求 ${hData.runningRequests}`);

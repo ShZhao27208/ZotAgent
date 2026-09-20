@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.4 - 2026-09-21
+
+### Fixes
+
+- Bound health, configuration, and CLI discovery requests with Zotero HTTP timeouts; expose failed discovery instead of waiting indefinitely.
+- Normalize saved Linux paths pasted with backslashes and a missing leading slash.
+- Launch Bash through `wsl.exe --exec` to prevent the default WSL shell from expanding startup variables prematurely.
+- Repair an incorrectly capitalized home directory only when Runtime confirms the configured directory does not exist.
+- Provide explicit bootstrap timers and report early WSL process exits.
+
+### Validation
+
+- Launched Runtime from Windows using the normalized saved paths on an isolated test port; authenticated health and all three CLI version checks passed.
+- Stopped the test Runtime after validation. Zotero UI installation validation remains manual.
+
 ## 0.3.3 - 2026-09-21
 
 ### Fixes

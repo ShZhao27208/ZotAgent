@@ -6,7 +6,7 @@ ZotAgent 是一个面向学术阅读与研究工作的 Zotero 插件。它不是
 
 项目同时面向 **Windows 与 WSL** 环境。Agent 可按实际安装位置配置为 Windows 或 WSL 命令，Runtime Host 负责鉴权、进程管理、流式输出和原生终端通信。
 
-当前版本：**0.3.3**
+当前版本：**0.3.4**
 
 ## 为什么使用 ZotAgent
 
@@ -148,7 +148,7 @@ dist/zotagent-<package.json 中的版本>.xpi
 | WSL 发行版 | `wsl.exe -d` 使用的发行版名称 | `Ubuntu` |
 | 默认工作目录 | Agent 启动和工具执行目录 | `/home/user` |
 
-保持“启动 Zotero 时自动启动并连接 Runtime”开启，插件会生成 Token 并通过 `wsl.exe` 启动 Runtime。启动时会加载 NVM 环境，连接成功后自动检测 Codex、Claude Code 和 OpenCode，并将可用 CLI 的绝对路径回填到设置。检测范围包括 PATH、当前 Node.js 目录、`~/.local/bin` 和 NVM 安装目录；手动填写的绝对路径会保留。默认工作目录为空时，会从 Runtime 读取其默认目录。也可以点击“立即启动”和“检测连接”检查状态。
+保持“启动 Zotero 时自动启动并连接 Runtime”开启，插件会生成 Token 并通过 `wsl.exe` 启动 Runtime。启动时通过 `wsl.exe --exec` 直接调用 Bash 并加载 NVM 环境，连接成功后自动检测 Codex、Claude Code 和 OpenCode，并将可用 CLI 的绝对路径回填到设置。检测范围包括 PATH、当前 Node.js 目录、`~/.local/bin` 和 NVM 安装目录；手动填写的绝对路径会保留。默认工作目录为空时，会从 Runtime 读取其默认目录。也可以点击“立即启动”和“检测连接”检查状态。
 
 需要手动启动时：
 
@@ -224,6 +224,8 @@ Windows CLI 路径应填写 Runtime 能访问的路径，例如 `/mnt/c/Users/<�
 ## 常见问题
 
 ### Runtime 无法连接
+
+连接检查使用明确的超时，不会无限停留在“正在连接”。设置中粘贴的 `home\用户\...` 路径会转换为 `/home/用户/...`；Linux 路径区分大小写。Runtime 确认主目录不存在且仅大小写不匹配时，插件会采用真实主目录。
 
 确认 Endpoint、Token、WSL 发行版、Node.js 路径和 Runtime 脚本路径正确。若提示 Token 不匹配，通常是旧 Runtime 仍占用端口；停止旧进程后重新启动。
 

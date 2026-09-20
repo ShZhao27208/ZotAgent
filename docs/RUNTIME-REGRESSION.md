@@ -18,3 +18,11 @@
 ## 验证边界
 
 回归测试模拟 Zotero 安装包 URI 和进程调用，并验证 Runtime health、CLI 发现及并发启动。本机 Codex / Claude Code / OpenCode 的版本检测成功。尚未在 Windows Zotero UI 内完成端到端安装验证。
+
+## 0.3.3 安装后的现场复查
+
+确认 Windows Zotero 实际安装的是 0.3.3。保存的 Runtime / Node 设置为 `home\shzhao\...`，缺少开头的 `/`；工作目录为不存在的 `/home/ShZhao`。Windows 对没有监听进程的端口请求会超时，而原先 health fetch 没有设置截止时间，因此可能一直停在启动前的探测阶段。
+
+使用 Windows ProcessStartInfo 调用插件产生的 WSL 启动参数后，进一步复现 `exec: : not found`。`wsl.exe -- bash -lc` 经过默认 shell，提前展开了传给 Bash 的变量。改为 `wsl.exe --exec bash -lc` 后，在独立端口完成了实际 Windows → WSL → Runtime 的鉴权 health 检查，以及 OpenCode 1.18.31、Codex 0.154.0、Claude Code 2.1.278 的可用性检测；测试进程已关闭。
+
+0.3.4 增加有超时的 Zotero HTTP 请求、已保存路径规范化、直接 WSL exec、进程提前退出诊断，以及经 Runtime 确认不存在后才应用的主目录大小写修复。尚未直接操作 Zotero UI 安装新版。

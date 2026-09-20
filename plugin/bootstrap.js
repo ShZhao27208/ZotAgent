@@ -23,7 +23,10 @@ async function startup({ rootURI }) {
     ["content", "zotagent", rootURI + "content/"],
   ]);
 
-  const context = { rootURI, Services };
+  let timers;
+  try { timers = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs"); }
+  catch (_) { timers = ChromeUtils.import("resource://gre/modules/Timer.jsm"); }
+  const context = { rootURI, Services, setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout };
   context._globalThis = context;
   Services.scriptloader.loadSubScript(
     rootURI + "content/zot-agent.js",
