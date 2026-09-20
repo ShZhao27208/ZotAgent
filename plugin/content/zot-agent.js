@@ -117,32 +117,17 @@
           throw new Error("Node.js 路径必须是 WSL 绝对路径");
         }
       }
-      const nodeDirectory = nodePath.startsWith("/")
-        ? nodePath.replace(/\/[^/]+$/, "")
-        : "";
-      const homeDir = runtimePath.match(/^(\/home\/[^/]+)/)?.[1] || "";
-      const nvmPaths = homeDir
-        ? [`${homeDir}/.nvm/versions/node/*/bin`, `${homeDir}/.local/bin`]
-        : [];
-      const runtimePathValue = [
-        nodeDirectory,
-        ...nvmPaths,
-        "/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin",
-      ].filter(Boolean).join(":");
       const distro = String(pref("wslDistro", "Ubuntu")).trim() || "Ubuntu";
       const executable = Components.classes["@mozilla.org/file/local;1"]
         .createInstance(Components.interfaces.nsIFile);
       executable.initWithPath("C:\\Windows\\System32\\wsl.exe");
       if (!executable.exists()) throw new Error("未找到 wsl.exe");
 
+      const shellCmd = `ZOTAGENT_TOKEN=${this.token()} exec ${nodePath} ${runtimePath}`;
       const process = Components.classes["@mozilla.org/process/util;1"]
         .createInstance(Components.interfaces.nsIProcess);
       process.init(executable);
-      const args = [
-        "-d", distro, "--", "env", `ZOTAGENT_TOKEN=${this.token()}`,
-        `PATH=${runtimePathValue}`,
-        nodePath, runtimePath,
-      ];
+      const args = ["-d", distro, "--", "bash", "-lc", shellCmd];
       const observer = {
         observe() { runtimeProcesses.delete(process); },
       };
