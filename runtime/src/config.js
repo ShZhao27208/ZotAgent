@@ -1,10 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, accessSync, constants } from "node:fs";
+import { join, delimiter, dirname } from "node:path";
 
 export function resolveClaudePath() {
-  // Scan NVM global modules for the Claude Code package
+  const native = resolveFromPath("claude");
+  if (native !== "claude") return native;
+  // Scan NVM global modules for legacy Claude Code installations
   const nvmDir = process.env.NVM_DIR || join(process.env.HOME || "/tmp", ".nvm");
   try {
     const versionsDir = join(nvmDir, "versions/node");
@@ -33,12 +35,27 @@ export function resolveClaudePath() {
   return "claude";
 }
 
-function resolveFromPath(command) {
+export function resolveFromPath(command, env = process.env, nodePath = process.execPath) {
+  const home = env.HOME || "/tmp";
+  const directories = [
+    ...(env.PATH || "").split(delimiter).filter(Boolean),
+    dirname(nodePath), join(home, ".local/bin"), join(home, ".npm-global/bin"),
+    join(home, ".opencode/bin"), "/usr/local/bin", "/usr/bin",
+  ];
+  const versions = join(env.NVM_DIR || join(home, ".nvm"), "versions/node");
   try {
-    return execFileSync("which", [command], { encoding: "utf8" }).trim();
-  } catch {
-    return command;
+    for (const version of readdirSync(versions).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))) {
+      directories.push(join(versions, version, "bin"));
+    }
+  } catch {}
+  for (const directory of directories) {
+    const candidate = join(directory, command);
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {}
   }
+  return command;
 }
 
 const DEFAULT_PATHS = {

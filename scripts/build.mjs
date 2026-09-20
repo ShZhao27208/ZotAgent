@@ -21,6 +21,12 @@ await fs.rm(distDir, { recursive: true, force: true });
 await fs.mkdir(pluginBuild, { recursive: true });
 await fs.mkdir(distDir, { recursive: true });
 await fs.cp(pluginSource, pluginBuild, { recursive: true });
+// A locally built XPI keeps its runtime source location after Zotero copies it.
+await fs.writeFile(path.join(pluginBuild, "runtime-location.json"), JSON.stringify({
+  script: path.join(root, "runtime/src/index.js"),
+  node: process.execPath,
+  distro: process.env.WSL_DISTRO_NAME || "Ubuntu",
+}));
 const vendorDir = path.join(pluginBuild, "content/vendor");
 await fs.mkdir(vendorDir, { recursive: true });
 await fs.copyFile(path.join(root, "node_modules/@xterm/xterm/lib/xterm.js"), path.join(vendorDir, "xterm.js"));

@@ -79,7 +79,13 @@
         const response = await fetch(this.endpoint("/v1/health"), {
           headers: { authorization: `Bearer ${this.token()}` },
         });
-        if (response.ok) return "running";
+        if (response.ok) {
+          const health = await response.json();
+          if (!String(pref("defaultWorkingDirectory", "")).trim() && health.defaultCwd?.startsWith("/")) {
+            setPref("defaultWorkingDirectory", health.defaultCwd);
+          }
+          return "running";
+        }
         if (response.status === 401) return "unauthorized";
         return "unavailable";
       } catch {
@@ -90,6 +96,8 @@
     async healthy() { return (await this.probe()) === "running"; },
 
     _autoDetectRuntimePath() {
+      const location = Zotero.ZotAgent?._runtimeLocation;
+      if (location?.script) return windowsToWSLPath(location.script);
       const uri = Zotero.ZotAgent?._rootURI;
       if (!uri) return "";
       const pluginDir = rootURIToWSLPath(uri);
@@ -108,7 +116,7 @@
       }
       runtimePath = windowsToWSLPath(runtimePath);
       if (!runtimePath.startsWith("/")) {
-        throw new Error("Runtime 脚本路径必须是 WSL 绝对路径");
+        throw new Error("未找到 Runtime 源码，请在设置中填写 runtime/src/index.js 的 WSL 绝对路径");
       }
       let nodePath = String(pref("runtimeNodePath", "node")).trim() || "node";
       if (nodePath !== "node") {
@@ -123,7 +131,14 @@
       executable.initWithPath("C:\\Windows\\System32\\wsl.exe");
       if (!executable.exists()) throw new Error("未找到 wsl.exe");
 
-      const shellCmd = `ZOTAGENT_TOKEN=${this.token()} exec ${nodePath} ${runtimePath}`;
+      const quote = (value) => "'" + String(value).replace(/'/g, "'\\''") + "'";
+      const location = Zotero.ZotAgent?._runtimeLocation;
+      // Non-interactive WSL shells often skip NVM initialization in .bashrc.
+      const setup = 'export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"; [ ! -s "$NVM_DIR/nvm.sh" ] || . "$NVM_DIR/nvm.sh"; export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"; ';
+      const nodeSetup = nodePath === "node" && location?.node
+        ? `if [ -x ${quote(windowsToWSLPath(location.node))} ]; then ZA_NODE=${quote(windowsToWSLPath(location.node))}; else ZA_NODE=node; fi; `
+        : `ZA_NODE=${quote(nodePath)}; `;
+      const shellCmd = setup + nodeSetup + `export PATH="$(dirname "$ZA_NODE"):$PATH"; ZOTAGENT_TOKEN=${quote(this.token())} exec "$ZA_NODE" ${quote(runtimePath)}`;
       const process = Components.classes["@mozilla.org/process/util;1"]
         .createInstance(Components.interfaces.nsIProcess);
       process.init(executable);
@@ -137,6 +152,16 @@
     },
 
     async ensureRunning(force = false) {
+      if (this._pending) return this._pending;
+      this._pending = this._ensureRunning(force).then(async (state) => {
+        if (state.status !== "disabled") await new RuntimeClient(null).syncAgentPaths();
+        return state;
+      });
+      try { return await this._pending; }
+      finally { this._pending = null; }
+    },
+
+    async _ensureRunning(force = false) {
       const current = await this.probe();
       if (current === "running") return { status: "running" };
       if (current === "unauthorized") {
@@ -658,10 +683,10 @@
         const agentsRes = await fetch(this.endpoint("/v1/agents"), { headers: this.headers() });
         if (agentsRes.ok) {
           const agents = await agentsRes.json();
-          this.dialog._agentCapabilities = agents;
+          if (this.dialog) this.dialog._agentCapabilities = agents;
           const prefMap = { opencode: "opencodePath", codex: "codexPath", "claude-code": "claudePath" };
           for (const [name, info] of Object.entries(agents)) {
-            if (!info.executable || !prefMap[name]) continue;
+            if (!info.available || !info.executable || !prefMap[name]) continue;
             const current = String(pref(prefMap[name], "")).trim();
             if (!current || !current.startsWith("/")) {
               setPref(prefMap[name], info.executable);

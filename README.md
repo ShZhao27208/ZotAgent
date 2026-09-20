@@ -6,7 +6,7 @@ ZotAgent 是一个面向学术阅读与研究工作的 Zotero 插件。它不是
 
 项目同时面向 **Windows 与 WSL** 环境。Agent 可按实际安装位置配置为 Windows 或 WSL 命令，Runtime Host 负责鉴权、进程管理、流式输出和原生终端通信。
 
-当前版本：**0.3.2**
+当前版本：**0.3.3**
 
 ## 为什么使用 ZotAgent
 
@@ -110,7 +110,9 @@ Zotero PDF / 条目 / 选区 / 截图
 2. 打开 Zotero 的 `工具 -> 插件`。
 3. 点击右上角菜单，选择“从文件安装插件”。
 4. 选择 XPI，安装后重启 Zotero。
-5. 打开 `编辑 -> 设置 -> ZotAgent` 完成首次配置。
+5. 打开 `编辑 -> 设置 -> ZotAgent` 查看自动连接和 Agent 检测结果。
+
+本机源码构建的 XPI 会记录构建时的 Runtime 脚本和 Node.js 位置，安装后无需手填当前项目路径。请保留源码目录及其 `node_modules`；XPI 本身不包含 Node.js 或 Runtime 依赖。复制到另一台电脑或移动源码后，需要在设置中更新 Runtime 脚本路径与 Node.js 路径。
 
 更新时建议退出旧的原生终端并重启 Zotero。如果安装新版本后行为仍与旧版一致，请确认旧 Runtime 没有继续占用 `24119` 端口。
 
@@ -146,7 +148,7 @@ dist/zotagent-<package.json 中的版本>.xpi
 | WSL 发行版 | `wsl.exe -d` 使用的发行版名称 | `Ubuntu` |
 | 默认工作目录 | Agent 启动和工具执行目录 | `/home/user` |
 
-保持“启动 Zotero 时自动启动并连接 Runtime”开启，插件会生成 Token 并通过 `wsl.exe` 启动 Runtime。也可以点击“立即启动”和“检测连接”检查状态。
+保持“启动 Zotero 时自动启动并连接 Runtime”开启，插件会生成 Token 并通过 `wsl.exe` 启动 Runtime。启动时会加载 NVM 环境，连接成功后自动检测 Codex、Claude Code 和 OpenCode，并将可用 CLI 的绝对路径回填到设置。检测范围包括 PATH、当前 Node.js 目录、`~/.local/bin` 和 NVM 安装目录；手动填写的绝对路径会保留。默认工作目录为空时，会从 Runtime 读取其默认目录。也可以点击“立即启动”和“检测连接”检查状态。
 
 需要手动启动时：
 

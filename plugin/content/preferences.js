@@ -34,6 +34,8 @@
     const result = doc.querySelector("#zotagent-agent-result");
     result.textContent = `正在检测 ${agentName}...`;
     try {
+      await Zotero.ZotAgent.runtimeManager.ensureRunning(true);
+      refreshDetectedFields(doc);
       const response = await fetch(runtimeEndpoint("/v1/agents"), {
         headers: runtimeHeaders(),
       });
@@ -68,6 +70,14 @@
     }
   }
 
+  function refreshDetectedFields(doc) {
+    for (const element of doc.querySelectorAll("[data-pref]")) {
+      if (!isCheckbox(element) && !isSelect(element) && doc.activeElement !== element) {
+        element.value = get(element.dataset.pref) ?? "";
+      }
+    }
+  }
+
   function load(win) {
     const doc = win.document;
     for (const element of doc.querySelectorAll("[data-pref]")) {
@@ -95,11 +105,23 @@
       }
     }
 
+    const status = doc.querySelector("#zotagent-runtime-result");
+    if (status) status.textContent = "正在连接 Runtime 并检测 Agent...";
+    Zotero.ZotAgent.runtimeManager.ensureRunning().then((state) => {
+      refreshDetectedFields(doc);
+      if (status) status.textContent = state.status === "disabled"
+        ? "Runtime 自动启动已关闭，可点击立即启动"
+        : "Runtime 已连接，Agent 路径已自动检测";
+    }).catch((error) => {
+      if (status) status.textContent = "自动连接失败: " + error.message;
+    });
+
     doc.querySelector("#zotagent-start-runtime")?.addEventListener("command", async () => {
       const result = doc.querySelector("#zotagent-runtime-result");
       result.textContent = "正在启动 WSL Runtime...";
       try {
         const state = await Zotero.ZotAgent.runtimeManager.ensureRunning(true);
+        refreshDetectedFields(doc);
         const tokenInput = doc.querySelector("#zotagent-runtime-token");
         if (tokenInput) tokenInput.value = get("runtimeToken") || "";
         result.textContent = state.status === "running"
@@ -114,30 +136,8 @@
       const result = doc.querySelector("#zotagent-runtime-result");
       result.textContent = "检测中...";
       try {
-        const executables = {};
-        const platforms = {};
-        const opencode = String(get("opencodePath") || "").trim();
-        const codex = String(get("codexPath") || "").trim();
-        const claude = String(get("claudePath") || "").trim();
-        if (opencode) executables.opencode = opencode;
-        if (codex) executables.codex = codex;
-        if (claude) executables["claude-code"] = claude;
-
-        const opPlatform = String(get("opencodePlatform") || "wsl");
-        const cxPlatform = String(get("codexPlatform") || "wsl");
-        const clPlatform = String(get("claudePlatform") || "wsl");
-        platforms.opencode = opPlatform;
-        platforms.codex = cxPlatform;
-        platforms["claude-code"] = clPlatform;
-
-        if (Object.keys(executables).length || Object.keys(platforms).length) {
-          const update = await fetch(runtimeEndpoint("/v1/config/agents"), {
-            method: "POST",
-            headers: runtimeHeaders(),
-            body: JSON.stringify({ executables, platforms }),
-          });
-          if (!update.ok) throw new Error(`配置同步失败 ${update.status}`);
-        }
+        await Zotero.ZotAgent.runtimeManager.ensureRunning(true);
+        refreshDetectedFields(doc);
 
         const response = await fetch(runtimeEndpoint("/v1/agents"), {
           headers: runtimeHeaders(),

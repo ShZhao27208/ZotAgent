@@ -26,7 +26,9 @@ test("Runtime Host requires authentication and reports health", async (context) 
     headers: { authorization: `Bearer ${token}` },
   });
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).status, "ok");
+  const health = await response.json();
+  assert.equal(health.status, "ok");
+  assert.ok(path.isAbsolute(health.defaultCwd));
 
   const invalidConfig = await fetch(`http://127.0.0.1:${port}/v1/config/agents`, {
     method: "POST",

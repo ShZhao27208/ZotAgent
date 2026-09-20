@@ -34,6 +34,10 @@ async function startup({ rootURI }) {
     context,
   );
   Zotero.ZotAgent._rootURI = rootURI;
+  try {
+    const location = await Zotero.File.getContentsAsync(rootURI + "runtime-location.json");
+    Zotero.ZotAgent._runtimeLocation = JSON.parse(location);
+  } catch (_) {}
   await Zotero.ZotAgent.hooks.onStartup();
 }
 

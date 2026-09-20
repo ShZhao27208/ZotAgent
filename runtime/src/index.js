@@ -254,6 +254,7 @@ const server = http.createServer(async (request, response) => {
         status: "ok",
         pid: process.pid,
         runningRequests: running.size,
+        defaultCwd: config.defaultCwd,
       });
       return;
     }
