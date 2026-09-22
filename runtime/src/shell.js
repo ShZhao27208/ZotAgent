@@ -31,7 +31,7 @@ function quoteCmd(value) { return `"${String(value).replaceAll("%", "%%").replac
 export function shellInvocation(shell, command, args = []) {
   const name = shell?.name || detectShell();
   if (name === "cmd") {
-    return { command: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", [command, ...args].map(quoteCmd).join(" ")] };
+    return { command: process.env.ComSpec || "cmd.exe", args: ["/s", "/c", [command, ...args].map(quoteCmd).join(" ")] };
   }
   if (name === "powershell" || name === "pwsh") {
     const line = ["&", quotePowerShell(command), ...args.map(quotePowerShell)].join(" ");

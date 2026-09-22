@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.6 - 2026-09-23
+
+### Improvements
+
+- Run structured Agent requests, version checks, and PTY sessions through the user's current default Shell with its login configuration.
+- Use automatic runtime environment defaults instead of requiring WSL-specific platform settings for every Agent.
+- Keep OpenCode on its native default model unless a temporary override is explicitly configured, and show detected model information in the dialog.
+- Preserve CMD AutoRun configuration when launching Windows commands.
+
+### Validation
+
+- 95 Node.js tests pass; XPI build and verification pass.
+
 ## 0.3.5 - 2026-09-21
 
 ### Fixes

@@ -21,5 +21,5 @@ test("uses native Windows shell invocation", () => {
   assert.deepEqual(powershell.args.slice(0, 2), ["-NoLogo", "-Command"]);
   const cmd = shellInvocation(shellDescriptor({ ComSpec: "cmd.exe" }, "win32"), "claude", ["--version"]);
   assert.equal(cmd.command, "cmd.exe");
-  assert.deepEqual(cmd.args.slice(0, 2), ["/d", "/s"]);
+  assert.deepEqual(cmd.args.slice(0, 2), ["/s", "/c"]);
 });
