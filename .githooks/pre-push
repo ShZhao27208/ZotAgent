@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -eu
+
+npm run version-history >/dev/null
+if ! git diff --quiet -- docs/VERSION-HISTORY.md; then
+  echo "VERSION-HISTORY.md 已因新提交或远端引用变化而更新。请先提交该文件，再重新 push。" >&2
+  exit 1
+fi

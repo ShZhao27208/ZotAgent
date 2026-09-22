@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, accessSync, constants } from "node:fs";
 import { join, delimiter, dirname } from "node:path";
+import { shellDescriptor } from "./shell.js";
 
 export function resolveClaudePath() {
   const native = resolveFromPath("claude");
@@ -65,9 +66,9 @@ const DEFAULT_PATHS = {
 };
 
 const DEFAULT_PLATFORMS = {
-  opencode: "wsl",
-  codex: "wsl",
-  "claude-code": "wsl",
+  opencode: process.platform === "win32" ? "windows" : "wsl",
+  codex: process.platform === "win32" ? "windows" : "wsl",
+  "claude-code": process.platform === "win32" ? "windows" : "wsl",
 };
 
 function readArg(name) {
@@ -87,8 +88,9 @@ export function loadConfig() {
     port: Number(process.env.ZOTAGENT_PORT || readArg("--port") || 24119),
     token,
     generatedToken,
-    defaultCwd: process.env.ZOTAGENT_CWD || process.env.HOME || "/tmp",
-    defaultWindowsCwd: process.env.ZOTAGENT_WIN_CWD || "/mnt/c/Users",
+    shell: shellDescriptor(),
+    defaultCwd: process.env.ZOTAGENT_CWD || (process.platform === "win32" ? process.cwd() : process.env.HOME || "/tmp"),
+    defaultWindowsCwd: process.env.ZOTAGENT_WIN_CWD || process.env.USERPROFILE || (process.platform === "win32" ? process.cwd() : "/mnt/c/Users"),
     executables: {
       opencode: process.env.ZOTAGENT_OPENCODE || DEFAULT_PATHS.opencode,
       codex: process.env.ZOTAGENT_CODEX || DEFAULT_PATHS.codex,
@@ -99,6 +101,11 @@ export function loadConfig() {
       opencode: process.env.ZOTAGENT_OPENCODE_PLATFORM || DEFAULT_PLATFORMS.opencode,
       codex: process.env.ZOTAGENT_CODEX_PLATFORM || DEFAULT_PLATFORMS.codex,
       "claude-code": process.env.ZOTAGENT_CLAUDE_PLATFORM || DEFAULT_PLATFORMS["claude-code"],
+    },
+    commands: {
+      opencode: process.env.ZOTAGENT_OPENCODE_COMMAND || "opencode",
+      codex: process.env.ZOTAGENT_CODEX_COMMAND || "codex",
+      "claude-code": process.env.ZOTAGENT_CLAUDE_COMMAND || "claude",
     },
   };
 }

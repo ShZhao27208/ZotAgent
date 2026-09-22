@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyRawEvent, extractSessionID, extractText, parseAgentLine } from "../runtime/src/normalize.js";
+import { classifyRawEvent, extractModel, extractSessionID, extractText, parseAgentLine } from "../runtime/src/normalize.js";
+
+test("extracts model identifiers from native event shapes", () => {
+  assert.equal(extractModel({ type: "session.started", model: "provider/model" }), "provider/model");
+  assert.equal(extractModel({ data: { model_id: "gpt-test" } }), "gpt-test");
+  assert.equal(extractModel({ type: "message.completed" }), null);
+});
 
 test("extracts session identifiers from all adapter shapes", () => {
   assert.equal(extractSessionID({ type: "thread.started", thread_id: "c1" }), "c1");

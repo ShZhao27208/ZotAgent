@@ -2,6 +2,27 @@ function firstString(...values) {
   return values.find((value) => typeof value === "string" && value.length);
 }
 
+export function extractModel(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  return firstString(
+    raw.model,
+    raw.model_id,
+    raw.modelID,
+    raw.data?.model,
+    raw.data?.model_id,
+    raw.data?.modelID,
+    raw.response?.model,
+    raw.message?.model,
+    raw.info?.model,
+    raw.part?.model,
+    raw.part?.modelID,
+    raw.part?.model_id,
+    raw.properties?.model,
+    raw.properties?.modelID,
+    raw.properties?.model_id,
+  ) || null;
+}
+
 export function extractSessionID(raw) {
   if (!raw || typeof raw !== "object") return null;
   return firstString(

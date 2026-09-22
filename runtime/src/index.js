@@ -20,6 +20,7 @@ import {
   classifyRawEvent,
   extractSessionID,
   extractText,
+  extractModel,
   parseAgentLine,
 } from "./normalize.js";
 import { listSessions, upsertSession, deleteSession } from "./sessions.js";
@@ -32,6 +33,7 @@ import {
   subscribePtySession,
   resizePtySession,
 } from "./pty-manager.js";
+import { shellInvocation, shellCommandName } from "./shell.js";
 
 const config = loadConfig();
 let adapters = createAdapters(config.executables, config.platforms);
@@ -92,13 +94,18 @@ function terminateProcess(child) {
   }
 }
 
+function processInvocation(invocation, agent) {
+  const command = shellCommandName(invocation.command, config.commands[agent]);
+  return { ...invocation, ...shellInvocation(config.shell, command, invocation.args) };
+}
+
 function runAgent(request, response) {
   if (request.image) {
     const imagePath = saveImageToTemp(request.image);
     if (imagePath) request.files.push(imagePath);
   }
   const adapter = adapters[request.agent];
-  const invocation = adapter.buildInvocation(request);
+  const invocation = processInvocation(adapter.buildInvocation(request), request.agent);
   if (invocation.nativeSessionID) {
     request.nativeSessionID = invocation.nativeSessionID;
   }
@@ -155,6 +162,11 @@ function runAgent(request, response) {
         nativeSessionID: request.nativeSessionID,
       }));
     }
+    const model = extractModel(raw);
+    if (model && model !== request.detectedModel) {
+      request.detectedModel = model;
+      writeEvent(response, envelope(request, "model.updated", { model }));
+    }
     writeEvent(response, envelope(request, classifyRawEvent(raw), {
       raw,
       nativeSessionID: request.nativeSessionID,
@@ -204,18 +216,19 @@ function runAgent(request, response) {
   });
 }
 
-function collectVersion(adapter) {
+function collectVersion(adapter, agent) {
   return new Promise((resolve) => {
-    const invocation = adapter.versionInvocation();
+    const invocation = processInvocation(adapter.versionInvocation(), agent);
     const child = spawn(invocation.command, invocation.args, {
       env: process.env,
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
     });
-    let output = "";
+    let stdoutOutput = "";
+    let stderrOutput = "";
     const timeout = setTimeout(() => terminateProcess(child), 5000);
-    child.stdout.on("data", (chunk) => (output += chunk));
-    child.stderr.on("data", (chunk) => (output += chunk));
+    child.stdout.on("data", (chunk) => (stdoutOutput += chunk));
+    child.stderr.on("data", (chunk) => (stderrOutput += chunk));
     child.on("error", (error) => {
       clearTimeout(timeout);
       resolve({ available: false, error: error.message });
@@ -224,8 +237,9 @@ function collectVersion(adapter) {
       clearTimeout(timeout);
       resolve({
         available: code === 0,
-        version: output.trim().split(/\r?\n/).find(Boolean) || null,
+        version: stdoutOutput.trim().split(/\r?\n/).find(Boolean) || stderrOutput.trim().split(/\r?\n/).find(Boolean) || null,
         executable: invocation.command,
+        shell: config.shell,
       });
     });
   });
@@ -262,6 +276,7 @@ const server = http.createServer(async (request, response) => {
         pid: process.pid,
         runningRequests: running.size,
         defaultCwd: config.defaultCwd,
+        shell: config.shell,
       });
       return;
     }
@@ -270,8 +285,9 @@ const server = http.createServer(async (request, response) => {
         Object.entries(adapters).map(async ([name, adapter]) => [
           name,
           {
-            ...(await collectVersion(adapter)),
+            ...(await collectVersion(adapter, name)),
             platform: adapter.platform,
+            shell: config.shell,
             supportsImages: adapter.supportsImages,
             supportsApproval: adapter.supportsApproval,
           },
@@ -300,12 +316,16 @@ const server = http.createServer(async (request, response) => {
         if (platform === "windows" || platform === "wsl") {
           config.platforms[name] = platform;
         }
+        const command = body.commands?.[name];
+        if (command) config.commands[name] = String(command).trim();
       }
       adapters = createAdapters(config.executables, config.platforms);
       writeJSON(response, 200, {
         status: "updated",
         executables: config.executables,
         platforms: config.platforms,
+        commands: config.commands,
+        shell: config.shell,
       });
       return;
     }
@@ -379,7 +399,12 @@ const server = http.createServer(async (request, response) => {
         config.defaultWindowsCwd,
       );
       const interactive = adapter.interactiveArgs(body.sessionID || null, cwd);
-      const session = createPtySession(adapter.executable, interactive.args, interactive.cwd, {}, { cols: body.cols, rows: body.rows });
+      const ptyInvocation = shellInvocation(
+        config.shell,
+        shellCommandName(adapter.executable, config.commands[agent]),
+        interactive.args,
+      );
+      const session = createPtySession(ptyInvocation.command, ptyInvocation.args, interactive.cwd, {}, { cols: body.cols, rows: body.rows });
       writeJSON(response, 200, { ptyID: session.id, agent, cwd });
       return;
     }

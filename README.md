@@ -49,7 +49,7 @@ ZotAgent 是一个面向学术阅读与研究工作的 Zotero 插件。它不是
 ### 多 Agent 工作区
 
 9. **一个界面切换三个 Agent**
-   每个对话框都可以在 OpenCode、Codex 和 Claude Code 之间切换。Agent 可执行文件、运行平台、默认工作目录和 OpenCode 模型在 `Zotero 设置 -> ZotAgent` 中统一配置。
+   每个对话框都可以在 OpenCode、Codex 和 Claude Code 之间切换。Agent 默认使用各自 CLI 的配置和模型；运行环境默认自动检测，也可以按 Agent 单独选择 Windows 或 WSL。
 
 10. **同一文献打开多个对话框**
     可以同时打开多个独立窗口，例如让 Claude Code 总结、Codex 核查论证、OpenCode 组织对比表。PDF 选区会广播到所有接收选区的窗口。
@@ -144,7 +144,7 @@ dist/zotagent-<package.json 中的版本>.xpi
 | Endpoint | Zotero 连接 Runtime 的本地地址 | `http://127.0.0.1:24119` |
 | Token | 本地 Bearer Token；留空时插件自动生成 | 自动生成 |
 | Runtime 脚本 | `runtime/src/index.js` 的 WSL 绝对路径 | `/home/user/.../ZotAgent/runtime/src/index.js` |
-| WSL Node.js | WSL 中 Node.js 可执行文件 | `/home/user/.nvm/.../bin/node` |
+| Runtime Node.js | Runtime 使用的 Node.js 可执行文件（高级设置） | 自动检测或绝对路径 |
 | WSL 发行版 | `wsl.exe -d` 使用的发行版名称 | `Ubuntu` |
 | 默认工作目录 | Agent 启动和工具执行目录 | `/home/user` |
 
@@ -162,9 +162,9 @@ ZOTAGENT_TOKEN='与插件设置一致的-token' npm run runtime
 为每个 Agent 配置：
 
 - 可执行文件的绝对路径；
-- 平台：`WSL (Linux)` 或 `Windows`；
+- 运行环境：默认自动检测，也可以选择 `WSL (Linux)` 或 `Windows`；
 - 默认 Agent；
-- 可选的 OpenCode 模型，格式为 `provider/model`。留空时使用 OpenCode 自己的默认模型。
+- 可选的 OpenCode 临时模型，格式为 `provider/model`。留空时使用 OpenCode 自己的默认模型。
 
 示例：
 
@@ -174,7 +174,7 @@ Codex CLI:   /home/user/.nvm/versions/node/v24.x/bin/codex
 Claude Code: /home/user/.nvm/versions/node/v24.x/bin/claude
 ```
 
-Windows CLI 路径应填写 Runtime 能访问的路径，例如 `/mnt/c/Users/<用户名>/.../claude.exe`，并把平台设置为 Windows。配置后分别点击三个“测试”按钮确认可用性。
+Windows CLI 路径只有在自动检测失败时才需要填写；配置后分别点击三个“测试”按钮确认可用性。
 
 ## 使用指南
 

@@ -148,7 +148,7 @@
         setPref("runtimeNodePath", nodePath);
       }
       if (!nodePath.startsWith("/")) {
-        throw new Error("请填写 WSL Node.js 绝对路径，或使用本机源码构建的安装包");
+        throw new Error("请填写 Runtime Node.js 绝对路径，或使用本机源码构建的安装包");
       }
       const endpoint = this.endpoint();
       const address = endpoint.match(/^http:\/\/(?:127\.0\.0\.1|localhost)(?::(\d+))?$/);
@@ -723,12 +723,12 @@
         if (opencode && opencode.startsWith("/")) executables.opencode = opencode;
         if (codex && codex.startsWith("/")) executables.codex = codex;
         if (claude && claude.startsWith("/")) executables["claude-code"] = claude;
-        const opP = String(pref("opencodePlatform", "wsl"));
-        const cxP = String(pref("codexPlatform", "wsl"));
-        const clP = String(pref("claudePlatform", "wsl"));
-        if (opP) platforms.opencode = opP;
-        if (cxP) platforms.codex = cxP;
-        if (clP) platforms["claude-code"] = clP;
+        const opP = String(pref("opencodePlatform", "auto"));
+        const cxP = String(pref("codexPlatform", "auto"));
+        const clP = String(pref("claudePlatform", "auto"));
+        if (opP === "wsl" || opP === "windows") platforms.opencode = opP;
+        if (cxP === "wsl" || cxP === "windows") platforms.codex = cxP;
+        if (clP === "wsl" || clP === "windows") platforms["claude-code"] = clP;
         if (!Object.keys(executables).length && !Object.keys(platforms).length) {
           // skip POST, go straight to fetching detected paths
         } else {
@@ -852,6 +852,7 @@
       this.requestID = null;
       this._requestState = "idle";
       this.lastProcessError = "";
+      this.currentModel = null;
       this.receiveSelections = Boolean(pref("receiveSelections", true));
       this.extraItems = [];
       this.primaryContext = null;
@@ -903,11 +904,12 @@
       const executionBar = createElement(this.doc, "div", "zotagent-execution-bar");
       this.cwdInput = createElement(this.doc, "input", "zotagent-cwd-input");
       this.cwdInput.value = String(pref("defaultWorkingDirectory", ""));
-      this.cwdInput.placeholder = "WSL 工作目录";
-      this.cwdInput.title = "该对话框的 WSL 工作目录";
+      this.cwdInput.placeholder = "工作目录（留空使用 Agent 默认目录）";
+      this.cwdInput.title = "该对话框的 Agent 工作目录";
       executionBar.append(this.cwdInput);
 
       this.contextBar = createElement(this.doc, "div", "zotagent-context-bar", "未绑定文献");
+      this.modelBar = createElement(this.doc, "div", "zotagent-model-bar", "模型：Agent 默认模型");
       this.selectionBox = createElement(this.doc, "div", "zotagent-selection-box");
       this.selectionLabel = createElement(this.doc, "div", "zotagent-selection-label", "PDF 选区");
       this.selectionInput = createElement(this.doc, "textarea", "zotagent-selection-input");
@@ -1000,6 +1002,7 @@
         header,
         executionBar,
         this.contextBar,
+        this.modelBar,
         this.selectionBox,
         this.refBar,
         this.extraItemsList,
@@ -1597,7 +1600,14 @@
     }
 
     selectedModel() {
+      // All agents use their native configuration by default. This remains an
+      // optional per-request override for existing users who configured it.
       return this.agent === "opencode" ? String(pref("opencodeModel", "")).trim() || null : null;
+    }
+
+    updateModelLabel(model) {
+      this.currentModel = model || null;
+      if (this.modelBar) this.modelBar.textContent = model ? `模型：${model}` : "模型：Agent 默认模型";
     }
 
     showApprovalUI(event) {
@@ -1748,6 +1758,9 @@
             assistant.item.text += event.data.text;
             assistant.element.textContent = assistant.item.text;
             this.messagesElement.scrollTop = this.messagesElement.scrollHeight;
+          }
+          if (event.type === "model.updated" && event.data?.model) {
+            this.updateModelLabel(event.data.model);
           }
           if (event.type === "tool.started") this.renderStatus("Agent 正在调用工具...");
           if (event.type === "tool.completed") this.renderStatus("工具调用完成");

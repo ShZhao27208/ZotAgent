@@ -9,7 +9,8 @@
     "clean": "node scripts/build.mjs --clean",
     "runtime": "node runtime/src/index.js",
     "test": "node --test",
-    "verify": "node scripts/verify.mjs"
+    "verify": "node scripts/verify.mjs",
+    "version-history": "node scripts/update-version-history.mjs"
   },
   "engines": {
     "node": ">=24"

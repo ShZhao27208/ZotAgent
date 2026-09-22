@@ -23,6 +23,13 @@ test("OpenCode uses JSON events and explicit directory", () => {
   assert.equal(invocation.args.at(-1), request.prompt);
 });
 
+test("OpenCode leaves model selection to its native configuration by default", () => {
+  const invocation = adapters.opencode.buildInvocation(request);
+  assert.equal(invocation.args.includes("--model"), false);
+  const overridden = adapters.opencode.buildInvocation({ ...request, model: "provider/model" });
+  assert.ok(overridden.args.includes("--model"));
+});
+
 test("Codex reads prompt from stdin and resumes native session", () => {
   const fresh = adapters.codex.buildInvocation(request);
   assert.equal(fresh.stdin, request.prompt);
