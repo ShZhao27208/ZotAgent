@@ -2,9 +2,9 @@
 
 > 本文件记录 GitHub 远端可见的完整 Git 历史。每次推送前运行 `npm run version-history`；本地 `.githooks/pre-push` 会在历史变化且文件未更新时阻止推送。
 
-- 历史截至：2026-09-21T01:52:35+08:00
+- 历史截至：2026-09-23T02:40:34+08:00
 - 项目：`ShZhao27208/ZotAgent`
-- 可见提交：48 个（按 Git 提交时间升序）
+- 可见提交：49 个（按 Git 提交时间升序）
 - 时间：ISO 8601，带时区
 
 ## 远端分支与标签
@@ -96,6 +96,7 @@
 | 46 | 2026-09-21T01:35:57+08:00 | `0.3.4` | `5dc2fbc` | chore: release v0.3.4 |
 | 47 | 2026-09-21T01:52:23+08:00 | `0.3.4` | `a4d3f1b` | fix(runtime): restore direct Node launch and recover unreachable default port |
 | 48 | 2026-09-21T01:52:35+08:00 | `0.3.5` | `878cd56` | chore: release v0.3.5 |
+| 49 | 2026-09-23T02:40:34+08:00 | `0.3.5` | `fb95985` | feat(runtime): inherit default shell and report agent model |
 
 ## 维护规则
 
