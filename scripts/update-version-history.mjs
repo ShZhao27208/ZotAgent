@@ -34,7 +34,10 @@ const refs = git([
 });
 
 const tags = refs.filter((ref) => ref.ref.startsWith("refs/tags/"));
-const branches = refs.filter((ref) => ref.ref.startsWith("refs/remotes/"));
+// Remote branch pointers move whenever this branch is pushed and would make
+// the history file self-changing. The full commit table below remains the
+// source of truth for every pushed commit; only stable tags are listed here.
+const branches = [];
 const latestCommitDate = commits.at(-1)?.date || "未知";
 
 const lines = [

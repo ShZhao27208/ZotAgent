@@ -11,11 +11,6 @@
 
 | 引用 | 提交 | 时间 | 说明 |
 | --- | --- | --- | --- |
-| `origin/HEAD` | `6244597adaa9` | 2026-09-10T23:47:39+08:00 | fix(selection): prevent stale PDF text from overwriting native selections |
-| `origin/fix/auto-detect-runtime-and-cli-paths` | `c8410f165bb3` | 2026-09-23T02:47:00+08:00 | docs: record v0.3.6 tag |
-| `origin/fix/review-11-issues` | `3615fdd09312` | 2026-09-20T22:53:22+08:00 | chore: remove outdated STATUS.md |
-| `origin/fix/v0.2.9-bugs-and-tests` | `f8f89d233f7e` | 2026-09-01T21:55:52+08:00 | test: add 41 tests covering classify, protocol, sessions and plugin utils |
-| `origin/main` | `6244597adaa9` | 2026-09-10T23:47:39+08:00 | fix(selection): prevent stale PDF text from overwriting native selections |
 | `v0.3.3` | `848e20b78a43` | 2026-09-21T01:20:06+08:00 | chore: release v0.3.3 |
 | `v0.3.4` | `5dc2fbc8d487` | 2026-09-21T01:35:57+08:00 | chore: release v0.3.4 |
 | `v0.3.5` | `878cd563b291` | 2026-09-21T01:52:35+08:00 | chore: release v0.3.5 |
