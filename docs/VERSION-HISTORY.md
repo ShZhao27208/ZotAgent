@@ -2,9 +2,9 @@
 
 > 本文件记录 GitHub 远端可见的完整 Git 历史。每次推送前运行 `npm run version-history`；本地 `.githooks/pre-push` 会在历史变化且文件未更新时阻止推送。
 
-- 历史截至：2026-09-23T02:40:34+08:00
+- 历史截至：2026-09-23T02:45:25+08:00
 - 项目：`ShZhao27208/ZotAgent`
-- 可见提交：49 个（按 Git 提交时间升序）
+- 可见提交：50 个（按 Git 提交时间升序）
 - 时间：ISO 8601，带时区
 
 ## 远端分支与标签
@@ -12,7 +12,7 @@
 | 引用 | 提交 | 时间 | 说明 |
 | --- | --- | --- | --- |
 | `origin/HEAD` | `6244597adaa9` | 2026-09-10T23:47:39+08:00 | fix(selection): prevent stale PDF text from overwriting native selections |
-| `origin/fix/auto-detect-runtime-and-cli-paths` | `878cd563b291` | 2026-09-21T01:52:35+08:00 | chore: release v0.3.5 |
+| `origin/fix/auto-detect-runtime-and-cli-paths` | `5329d6963c72` | 2026-09-23T02:41:32+08:00 | docs: record shell and model improvements |
 | `origin/fix/review-11-issues` | `3615fdd09312` | 2026-09-20T22:53:22+08:00 | chore: remove outdated STATUS.md |
 | `origin/fix/v0.2.9-bugs-and-tests` | `f8f89d233f7e` | 2026-09-01T21:55:52+08:00 | test: add 41 tests covering classify, protocol, sessions and plugin utils |
 | `origin/main` | `6244597adaa9` | 2026-09-10T23:47:39+08:00 | fix(selection): prevent stale PDF text from overwriting native selections |
@@ -97,6 +97,7 @@
 | 47 | 2026-09-21T01:52:23+08:00 | `0.3.4` | `a4d3f1b` | fix(runtime): restore direct Node launch and recover unreachable default port |
 | 48 | 2026-09-21T01:52:35+08:00 | `0.3.5` | `878cd56` | chore: release v0.3.5 |
 | 49 | 2026-09-23T02:40:34+08:00 | `0.3.5` | `fb95985` | feat(runtime): inherit default shell and report agent model |
+| 50 | 2026-09-23T02:45:25+08:00 | `0.3.6` | `3eef0c0` | chore: release v0.3.6 |
 
 ## 维护规则
 
