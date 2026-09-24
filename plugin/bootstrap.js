@@ -11,7 +11,7 @@ if (!Services) {
 
 function install() {}
 
-async function startup({ rootURI }) {
+async function startup({ rootURI, version }) {
   if (Zotero.ZotAgent?.hooks?.onShutdown) {
     try { await Zotero.ZotAgent.hooks.onShutdown(); } catch (_) {}
   }
@@ -37,6 +37,7 @@ async function startup({ rootURI }) {
     context,
   );
   Zotero.ZotAgent._rootURI = rootURI;
+  Zotero.ZotAgent._version = version;
   Services.scriptloader.loadSubScript(rootURI + "content/runtime-installer.js", context);
   await Zotero.ZotAgent.hooks.onStartup();
 }

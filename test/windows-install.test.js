@@ -38,9 +38,13 @@ function fixture(hasNode = true, scheme = 'jar') {
         extract(name, dest) { if (name === 'runtime.zip') archives++; entries.add(dest.path); extracted.push(name); },
       }) },
     } },
-    Zotero: { DataDirectory: { dir: 'C:\\Users\\测试 User\\Zotero' }, ZotAgent: { _rootURI: 'jar:file:///installed.xpi!/' },
+    Zotero: { DataDirectory: { dir: 'C:\\Users\\测试 User\\Zotero' }, ZotAgent: { _rootURI: 'jar:file:///installed.xpi!/', _version: '0.3.9' },
       Prefs: { get: key => prefs.get(key), set: (key, value) => prefs.set(key, value) },
-      File: { getContentsAsync: async () => '{"version":"0.3.8"}', download: async () => { throw new Error('jar resources must not use the HTTP download helper'); } },
+      File: { getContentsAsync: async uri => {
+        // Zotero forwards jar: strings to HTTP.request(), which reads URI credentials.
+        if (uri.startsWith('jar:')) throw new Error('NS_ERROR_FAILURE [nsIURI.username]');
+        throw new Error('Installer must not fetch its manifest through Zotero.File');
+      }, download: async () => { throw new Error('jar resources must not use the HTTP download helper'); } },
     },
   };
   vm.runInNewContext(source, context);
@@ -50,7 +54,7 @@ test('installed XPI extracts runtime and Windows PTY to local data directory, re
   const f = fixture();
   const result = await f.plugin.prepareWindowsRuntime();
   assert.equal(result.node, 'C:\\Node\\node.exe');
-  assert.equal(result.script, 'C:\\Users\\测试 User\\Zotero\\zotagent\\runtime\\0.3.8\\src\\index.js');
+  assert.equal(result.script, 'C:\\Users\\测试 User\\Zotero\\zotagent\\runtime\\0.3.9\\src\\index.js');
   assert.ok(f.extracted.includes('node_modules/node-pty/prebuilds/win32-x64/conpty.node'));
   await f.plugin.prepareWindowsRuntime();
   assert.equal(f.archives(), 1);
@@ -66,8 +70,38 @@ test('unpacked plugin copies the local runtime archive without a download', asyn
   assert.equal(f.copies(), 1);
   assert.equal(f.archives(), 0);
 });
-test('unsupported resource scheme fails before saving runtime paths', async () => {
+test('extraction failure preserves discovered Node and identifies failing stage', async () => {
   const f = fixture(true, 'https');
-  await assert.rejects(f.plugin.prepareWindowsRuntime(), /不支持的插件资源位置/);
-  assert.equal(f.prefs.size, 0);
+  await assert.rejects(f.plugin.prepareWindowsRuntime(), /从本地插件提取 Runtime 包失败：不支持的插件资源位置/);
+  assert.equal(f.prefs.get('extensions.zotagent.runtimeNodePath'), 'C:\\Node\\node.exe');
+  assert.equal(f.prefs.has('extensions.zotagent.runtimeScriptPath'), false);
+});
+
+test('invalid bootstrap version cannot become an extraction directory', async () => {
+  const f = fixture();
+  f.plugin._version = '../invalid';
+  await assert.rejects(f.plugin.prepareWindowsRuntime(), /读取插件版本失败/);
+  assert.equal(f.archives(), 0);
+});
+
+test('bootstrap passes host version to installer before startup hooks run', async () => {
+  let startupVersion;
+  const sandbox = {
+    Zotero: {},
+    Services: {
+      io: { newURI: value => value },
+      scriptloader: { loadSubScript(uri) {
+        if (uri.endsWith('/zot-agent.js')) sandbox.Zotero.ZotAgent = {
+          hooks: { onStartup: async () => { startupVersion = sandbox.Zotero.ZotAgent._version; } },
+        };
+      } },
+    },
+    ChromeUtils: { importESModule: () => ({ setTimeout, clearTimeout }) },
+    Components: { interfaces: {}, classes: {
+      '@mozilla.org/addons/addon-manager-startup;1': { getService: () => ({ registerChrome() {} }) },
+    } },
+  };
+  vm.runInNewContext(readFileSync(new URL('../plugin/bootstrap.js', import.meta.url), 'utf8'), sandbox);
+  await sandbox.startup({ rootURI: 'jar:file:///installed.xpi!/', version: '0.3.9' });
+  assert.equal(startupVersion, '0.3.9');
 });

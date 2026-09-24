@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.9 - 2026-09-24
+
+### Fixes
+
+- Remove the remaining jar manifest read through `Zotero.File.getContentsAsync`, which forwards to HTTP and triggers `nsIURI.username`. Use the version supplied by Zotero bootstrap instead.
+- Save detected Node immediately and label installer errors by stage.
+- Correct the test double to reproduce Zotero URI forwarding; verify failure before the fix and successful installation after it, plus bootstrap version propagation. Windows Zotero end-to-end verification remains pending.
+
 ## 0.3.8 - 2026-09-24
 
 ### Fixes

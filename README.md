@@ -6,7 +6,7 @@ ZotAgent 是一个面向学术阅读与研究工作的 Zotero 插件。它不是
 
 项目同时面向 **Windows 与 WSL** 环境。Agent 可按实际安装位置配置为 Windows 或 WSL 命令，Runtime Host 负责鉴权、进程管理、流式输出和原生终端通信。
 
-当前版本：**0.3.8**
+当前版本：**0.3.9**
 
 ## 为什么使用 ZotAgent
 

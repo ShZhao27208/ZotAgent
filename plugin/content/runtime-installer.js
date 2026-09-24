@@ -25,51 +25,64 @@
     throw new Error('未检测到 Windows Node.js。请安装 Node.js 24 或更高版本后重启 Zotero，或在高级设置选择 node.exe；无需安装 WSL。');
   }
   Zotero.ZotAgent.prepareWindowsRuntime = async function () {
-    const node = findNode();
-    const manifest = JSON.parse(await Zotero.File.getContentsAsync(this._rootURI + 'manifest.json'));
-    const base = directory(directory(file(Zotero.DataDirectory.dir), 'zotagent'), 'runtime');
-    const target = directory(base, manifest.version);
-    const marker = target.clone(); marker.append('.complete');
-    if (!marker.exists()) {
-      const archive = base.clone(); archive.append('runtime-' + manifest.version + '.zip');
-      // This is a local XPI resource, not an HTTP download. Zotero's download
-      // helper can read URI credentials, which jar: URIs do not support.
-      if (archive.exists()) archive.remove(false);
-      const uri = Services.io.newURI(this._rootURI + 'runtime.zip');
-      if (uri.scheme === 'jar') {
-        const jar = uri.QueryInterface(Components.interfaces.nsIJARURI);
-        const source = jar.JARFile.QueryInterface(Components.interfaces.nsIFileURL).file;
-        const outer = Components.classes['@mozilla.org/libjar/zip-reader;1'].createInstance(Components.interfaces.nsIZipReader);
-        outer.open(source);
-        try { outer.extract(jar.JAREntry, archive); } finally { outer.close(); }
-      } else if (uri.scheme === 'file') {
-        uri.QueryInterface(Components.interfaces.nsIFileURL).file.copyTo(base, archive.leafName);
-      } else {
-        throw new Error('不支持的插件资源位置：' + uri.scheme);
+    let stage = '检测本机 Node.js';
+    try {
+      const node = findNode();
+      Zotero.Prefs.set('extensions.zotagent.runtimeNodePath', node, true);
+      stage = '读取插件版本';
+      const version = this._version;
+      if (typeof version !== 'string' || !/^[0-9]+(?:\.[0-9]+){2}(?:[-+][a-z0-9.-]+)?$/i.test(version)) {
+        throw new Error('缺少有效的插件启动版本信息，请重启 Zotero');
       }
-      const zip = Components.classes['@mozilla.org/libjar/zip-reader;1'].createInstance(Components.interfaces.nsIZipReader);
-      zip.open(archive);
-      try {
-        const entries = zip.findEntries(null);
-        while (entries.hasMore()) {
-          const name = entries.getNext();
-          const parts = name.split('/').filter(Boolean);
-          if (!parts.length || name.startsWith('/') || parts.some(p => p === '..' || p.includes('\\') || p.includes(':'))) throw new Error('无效 Runtime 包路径');
-          let parent = target;
-          for (const part of parts.slice(0, -1)) parent = directory(parent, part);
-          if (name.endsWith('/')) { directory(parent, parts.at(-1)); continue; }
-          const dest = parent.clone(); dest.append(parts.at(-1));
-          if (dest.exists()) dest.remove(false);
-          zip.extract(name, dest);
+      stage = '创建本机 Runtime 目录';
+      const base = directory(directory(file(Zotero.DataDirectory.dir), 'zotagent'), 'runtime');
+      const target = directory(base, version);
+      const marker = target.clone(); marker.append('.complete');
+      if (!marker.exists()) {
+        stage = '从本地插件提取 Runtime 包';
+        const archive = base.clone(); archive.append('runtime-' + version + '.zip');
+        // This is a local XPI resource, not an HTTP download. Zotero's download
+        // helper can read URI credentials, which jar: URIs do not support.
+        if (archive.exists()) archive.remove(false);
+        const uri = Services.io.newURI(this._rootURI + 'runtime.zip');
+        if (uri.scheme === 'jar') {
+          const jar = uri.QueryInterface(Components.interfaces.nsIJARURI);
+          const source = jar.JARFile.QueryInterface(Components.interfaces.nsIFileURL).file;
+          const outer = Components.classes['@mozilla.org/libjar/zip-reader;1'].createInstance(Components.interfaces.nsIZipReader);
+          outer.open(source);
+          try { outer.extract(jar.JAREntry, archive); } finally { outer.close(); }
+        } else if (uri.scheme === 'file') {
+          uri.QueryInterface(Components.interfaces.nsIFileURL).file.copyTo(base, archive.leafName);
+        } else {
+          throw new Error('不支持的插件资源位置：' + uri.scheme);
         }
-      } finally { zip.close(); }
-      marker.create(Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 0o600);
-      archive.remove(false);
+        stage = '解压 Runtime 文件';
+        const zip = Components.classes['@mozilla.org/libjar/zip-reader;1'].createInstance(Components.interfaces.nsIZipReader);
+        zip.open(archive);
+        try {
+          const entries = zip.findEntries(null);
+          while (entries.hasMore()) {
+            const name = entries.getNext();
+            const parts = name.split('/').filter(Boolean);
+            if (!parts.length || name.startsWith('/') || parts.some(p => p === '..' || p.includes('\\') || p.includes(':'))) throw new Error('无效 Runtime 包路径');
+            let parent = target;
+            for (const part of parts.slice(0, -1)) parent = directory(parent, part);
+            if (name.endsWith('/')) { directory(parent, parts.at(-1)); continue; }
+            const dest = parent.clone(); dest.append(parts.at(-1));
+            if (dest.exists()) dest.remove(false);
+            zip.extract(name, dest);
+          }
+        } finally { zip.close(); }
+        marker.create(Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 0o600);
+        archive.remove(false);
+      }
+      stage = '校验并保存 Runtime 脚本路径';
+      const script = target.clone(); script.append('src'); script.append('index.js');
+      if (!script.exists()) { marker.remove(false); throw new Error('Runtime 安装不完整，请重新连接以修复'); }
+      Zotero.Prefs.set('extensions.zotagent.runtimeScriptPath', script.path, true);
+      return { node, script: script.path };
+    } catch (error) {
+      throw new Error(stage + '失败：' + (error.message || String(error)));
     }
-    const script = target.clone(); script.append('src'); script.append('index.js');
-    if (!script.exists()) { marker.remove(false); throw new Error('Runtime 安装不完整，请重新连接以修复'); }
-    Zotero.Prefs.set('extensions.zotagent.runtimeScriptPath', script.path, true);
-    Zotero.Prefs.set('extensions.zotagent.runtimeNodePath', node, true);
-    return { node, script: script.path };
   };
 })();
