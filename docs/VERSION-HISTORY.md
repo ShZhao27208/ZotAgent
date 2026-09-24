@@ -1,10 +1,10 @@
 # ZotAgent 版本与推送历史
 
-> 本文件记录 GitHub 远端可见的完整 Git 历史。每次推送前运行 `npm run version-history`；本地 `.githooks/pre-push` 会在历史变化且文件未更新时阻止推送。
+> 本文件记录本地可见的 Git 历史（含推送前待发布提交），不代表 GitHub 每次 push 的事件日志。每次推送前运行 `npm run version-history`；本地 `.githooks/pre-push` 会在历史变化且文件未更新时阻止推送。
 
-- 历史截至：2026-09-23T02:48:44+08:00
+- 历史截至：2026-09-24T16:43:22+08:00
 - 项目：`ShZhao27208/ZotAgent`
-- 可见提交：51 个（按 Git 提交时间升序）
+- 可见提交：52 个（按 Git 提交时间升序）
 - 时间：ISO 8601，带时区
 
 ## 远端分支与标签
@@ -15,6 +15,7 @@
 | `v0.3.4` | `5dc2fbc8d487` | 2026-09-21T01:35:57+08:00 | chore: release v0.3.4 |
 | `v0.3.5` | `878cd563b291` | 2026-09-21T01:52:35+08:00 | chore: release v0.3.5 |
 | `v0.3.6` | `52ba74fad437` | 2026-09-23T02:46:01+08:00 | docs: record v0.3.6 |
+| `v0.3.7` | `9ecca53b9d3a` | 2026-09-24T16:43:22+08:00 | fix(windows): bundle runtime and bootstrap with installed Node v0.3.7 |
 
 ## 正式版本
 
@@ -37,10 +38,12 @@
 | `0.3.3` | 2026-09-21 | `848e20b` | 安装后 XPI 保留 Runtime 来源；自动发现 CLI、初始化 NVM、同步 Agent 路径和默认工作目录。 |
 | `0.3.4` | 2026-09-21 | `5dc2fbc` | 增加连接超时、路径规范化、`wsl.exe --exec` 启动、主目录大小写修复和早退诊断。 |
 | `0.3.5` | 2026-09-21 | `878cd56` | 恢复直接 `env → Node → Runtime` 启动；传递自定义端口；默认端口失败时经鉴权回退到 `24129`。 |
+| `0.3.6` | 2026-09-23T02:46:01+08:00 | `52ba74fad437` | CLI Shell 启动、默认模型信息和版本维护；安装启动仍依赖外部 Runtime。 |
+| `0.3.7` | 2026-09-24T16:43:22+08:00 | `9ecca53` | XPI 内置 Runtime 与 Windows PTY，自动部署本机后端并复用已有 Node，无需 WSL。 |
 
 ## 全部推送提交
 
-下表保留每次推送的短编号、时间、当时的 package 版本和提交说明。版本号表示该提交中的 `package.json` 版本；没有单独发版的修复也会保留。
+下表保留代码提交的短编号、作者时间、当时的 package 版本和提交说明；Git 无法还原每次 push 的实际时间，纯历史文件维护提交不列入表中。版本号表示该提交中的 `package.json` 版本；没有单独发版的修复也会保留。
 
 | # | 时间 | 版本 | 提交 | 主要改动点 |
 | --- | --- | --- | --- | --- |
@@ -95,6 +98,7 @@
 | 49 | 2026-09-23T02:40:34+08:00 | `0.3.5` | `fb95985` | feat(runtime): inherit default shell and report agent model |
 | 50 | 2026-09-23T02:45:25+08:00 | `0.3.6` | `3eef0c0` | chore: release v0.3.6 |
 | 51 | 2026-09-23T02:48:44+08:00 | `0.3.6` | `158a652` | fix(docs): make version history stable across pushes |
+| 52 | 2026-09-24T16:43:22+08:00 | `0.3.7` | `9ecca53` | fix(windows): bundle runtime and bootstrap with installed Node v0.3.7 |
 
 ## 维护规则
 
