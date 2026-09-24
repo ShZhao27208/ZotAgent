@@ -2,9 +2,9 @@
 
 > 本文件记录本地可见的 Git 历史（含推送前待发布提交），不代表 GitHub 每次 push 的事件日志。每次推送前运行 `npm run version-history`；本地 `.githooks/pre-push` 会在历史变化且文件未更新时阻止推送。
 
-- 历史截至：2026-09-24T16:43:22+08:00
+- 历史截至：2026-09-24T16:59:59+08:00
 - 项目：`ShZhao27208/ZotAgent`
-- 可见提交：52 个（按 Git 提交时间升序）
+- 可见提交：53 个（按 Git 提交时间升序）
 - 时间：ISO 8601，带时区
 
 ## 远端分支与标签
@@ -16,6 +16,7 @@
 | `v0.3.5` | `878cd563b291` | 2026-09-21T01:52:35+08:00 | chore: release v0.3.5 |
 | `v0.3.6` | `52ba74fad437` | 2026-09-23T02:46:01+08:00 | docs: record v0.3.6 |
 | `v0.3.7` | `9ecca53b9d3a` | 2026-09-24T16:43:22+08:00 | fix(windows): bundle runtime and bootstrap with installed Node v0.3.7 |
+| `v0.3.8` | `8864a74bf9ad` | 2026-09-24T16:59:59+08:00 | fix(installer): extract local XPI without download URI credentials v0.3.8 |
 
 ## 正式版本
 
@@ -40,6 +41,7 @@
 | `0.3.5` | 2026-09-21 | `878cd56` | 恢复直接 `env → Node → Runtime` 启动；传递自定义端口；默认端口失败时经鉴权回退到 `24129`。 |
 | `0.3.6` | 2026-09-23T02:46:01+08:00 | `52ba74fad437` | CLI Shell 启动、默认模型信息和版本维护；安装启动仍依赖外部 Runtime。 |
 | `0.3.7` | 2026-09-24T16:43:22+08:00 | `9ecca53` | XPI 内置 Runtime 与 Windows PTY，自动部署本机后端并复用已有 Node，无需 WSL。 |
+| `0.3.8` | 2026-09-24T16:59:59+08:00 | `8864a74` | fix(installer): extract local XPI without download URI credentials v0.3.8 |
 
 ## 全部推送提交
 
@@ -99,6 +101,7 @@
 | 50 | 2026-09-23T02:45:25+08:00 | `0.3.6` | `3eef0c0` | chore: release v0.3.6 |
 | 51 | 2026-09-23T02:48:44+08:00 | `0.3.6` | `158a652` | fix(docs): make version history stable across pushes |
 | 52 | 2026-09-24T16:43:22+08:00 | `0.3.7` | `9ecca53` | fix(windows): bundle runtime and bootstrap with installed Node v0.3.7 |
+| 53 | 2026-09-24T16:59:59+08:00 | `0.3.8` | `8864a74` | fix(installer): extract local XPI without download URI credentials v0.3.8 |
 
 ## 维护规则
 
