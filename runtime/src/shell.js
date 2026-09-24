@@ -31,7 +31,8 @@ function quoteCmd(value) { return `"${String(value).replaceAll("%", "%%").replac
 export function shellInvocation(shell, command, args = []) {
   const name = shell?.name || detectShell();
   if (name === "cmd") {
-    return { command: process.env.ComSpec || "cmd.exe", args: ["/s", "/c", [command, ...args].map(quoteCmd).join(" ")] };
+    const line = `"${[command, ...args].map(quoteCmd).join(" ")}"`;
+    return { command: process.env.ComSpec || "cmd.exe", args: ["/s", "/c", line], windowsVerbatimArguments: true };
   }
   if (name === "powershell" || name === "pwsh") {
     const line = ["&", quotePowerShell(command), ...args.map(quotePowerShell)].join(" ");
@@ -42,4 +43,9 @@ export function shellInvocation(shell, command, args = []) {
 
 export function shellCommandName(executable, configured) {
   return String(configured || basename(String(executable || "")));
+}
+
+export function ptyShellArgs(invocation, platform = process.platform) {
+  return platform === "win32" && invocation.windowsVerbatimArguments
+    ? invocation.args.join(" ") : invocation.args;
 }

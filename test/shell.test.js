@@ -20,6 +20,28 @@ test("uses native Windows shell invocation", () => {
   assert.equal(powershell.command, "powershell.exe");
   assert.deepEqual(powershell.args.slice(0, 2), ["-NoLogo", "-Command"]);
   const cmd = shellInvocation(shellDescriptor({ ComSpec: "cmd.exe" }, "win32"), "claude", ["--version"]);
-  assert.equal(cmd.command, "cmd.exe");
+  assert.equal(cmd.command, process.env.ComSpec || "cmd.exe");
   assert.deepEqual(cmd.args.slice(0, 2), ["/s", "/c"]);
+});
+
+test('Windows CMD executes npm-style wrappers with literal spaced paths', { skip: process.platform !== 'win32' }, async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { spawnSync } = await import('node:child_process');
+  const { ptyShellArgs } = await import('../runtime/src/shell.js');
+  const dir = mkdtempSync(join(tmpdir(), 'zotagent shell '));
+  try {
+    const wrapper = join(dir, 'agent test.cmd');
+    writeFileSync(wrapper, '@echo off\r\necho version=%~1\r\necho "value=%~2"\r\n');
+    const invocation = shellInvocation({ name: 'cmd' }, wrapper, ['--version', 'hello & world']);
+    const result = spawnSync(invocation.command, invocation.args, {
+      cwd: dir, encoding: 'utf8', windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /version=--version/);
+    assert.match(result.stdout, /value=hello & world/);
+    // Validate the raw command line sent to node-pty too.
+    assert.equal(ptyShellArgs(invocation), invocation.args.join(' '));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

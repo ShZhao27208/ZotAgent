@@ -33,7 +33,7 @@ import {
   subscribePtySession,
   resizePtySession,
 } from "./pty-manager.js";
-import { shellInvocation, shellCommandName } from "./shell.js";
+import { shellInvocation, shellCommandName, ptyShellArgs } from "./shell.js";
 
 const config = loadConfig();
 if (process.platform === "win32") {
@@ -136,6 +136,7 @@ function runAgent(request, response) {
     cwd: invocation.cwd,
     env: process.env,
     shell: false,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments === true,
     detached: process.platform !== "win32",
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -226,6 +227,7 @@ function collectVersion(adapter, agent) {
     const child = spawn(invocation.command, invocation.args, {
       env: process.env,
       shell: false,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments === true,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdoutOutput = "";
@@ -241,6 +243,7 @@ function collectVersion(adapter, agent) {
       clearTimeout(timeout);
       resolve({
         available: code === 0,
+        error: code === 0 ? null : (stderrOutput.trim() || stdoutOutput.trim() || `版本检测失败（退出码 ${code}，可能超时）`),
         version: stdoutOutput.trim().split(/\r?\n/).find(Boolean) || stderrOutput.trim().split(/\r?\n/).find(Boolean) || null,
         executable: adapter.executable,
         shell: config.shell,
@@ -409,7 +412,7 @@ const server = http.createServer(async (request, response) => {
         shellCommandName(adapter.executable, config.commands[agent]),
         interactive.args,
       );
-      const session = createPtySession(ptyInvocation.command, ptyInvocation.args, interactive.cwd, {}, { cols: body.cols, rows: body.rows });
+      const session = createPtySession(ptyInvocation.command, ptyShellArgs(ptyInvocation), interactive.cwd, {}, { cols: body.cols, rows: body.rows });
       writeJSON(response, 200, { ptyID: session.id, agent, cwd });
       return;
     }

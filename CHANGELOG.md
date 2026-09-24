@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.10 - 2026-09-24
+
+### Fixes
+
+- Correct CMD outer quoting and disable Node argument re-escaping for Agent version checks and structured requests. Pass the raw CMD command line to Windows PTY.
+- Report stderr when Agent version checks fail instead of only showing unavailable.
+- Reproduced the old failure using Windows Node and an installed OpenCode npm wrapper; corrected invocation returns version 1.18.32. Add Windows regression coverage for spaced wrapper paths and arguments.
+
 ## 0.3.9 - 2026-09-24
 
 ### Fixes
