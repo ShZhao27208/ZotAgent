@@ -43,7 +43,7 @@ const latestCommitDate = commits.at(-1)?.date || "未知";
 const lines = [
   "# ZotAgent 版本与推送历史",
   "",
-  "> 本文件记录 GitHub 远端可见的完整 Git 历史。每次推送前运行 `npm run version-history`；本地 `.githooks/pre-push` 会在历史变化且文件未更新时阻止推送。",
+  "> 本文件记录本地可见的 Git 历史（含推送前待发布提交），不代表 GitHub 每次 push 的事件日志。每次推送前运行 `npm run version-history`；本地 `.githooks/pre-push` 会在历史变化且文件未更新时阻止推送。",
   "",
   `- 历史截至：${latestCommitDate}`,
   "- 项目：`ShZhao27208/ZotAgent`",
@@ -77,10 +77,15 @@ const lines = [
   "| `0.3.3` | 2026-09-21 | `848e20b` | 安装后 XPI 保留 Runtime 来源；自动发现 CLI、初始化 NVM、同步 Agent 路径和默认工作目录。 |",
   "| `0.3.4` | 2026-09-21 | `5dc2fbc` | 增加连接超时、路径规范化、`wsl.exe --exec` 启动、主目录大小写修复和早退诊断。 |",
   "| `0.3.5` | 2026-09-21 | `878cd56` | 恢复直接 `env → Node → Runtime` 启动；传递自定义端口；默认端口失败时经鉴权回退到 `24129`。 |",
+  ...tags.filter(ref => /^refs\/tags\/v\d+\.\d+\.\d+$/.test(ref.ref) && ref.ref.replace("refs/tags/v", "").localeCompare("0.3.5", undefined, { numeric: true }) > 0).map(ref => {
+    const commit = commits.find(c => c.hash.startsWith(ref.hash));
+    const description = ref.ref.endsWith("0.3.6") ? "CLI Shell 启动、默认模型信息和版本维护；安装启动仍依赖外部 Runtime。" : ref.ref.endsWith("0.3.7") ? "XPI 内置 Runtime 与 Windows PTY，自动部署本机后端并复用已有 Node，无需 WSL。" : (commit?.subject || ref.subject);
+    return `| \`${ref.ref.replace("refs/tags/v", "")}\` | ${ref.date} | \`${commit?.short || ref.hash}\` | ${description} |`;
+  }),
   "",
   "## 全部推送提交",
   "",
-  "下表保留每次推送的短编号、时间、当时的 package 版本和提交说明。版本号表示该提交中的 `package.json` 版本；没有单独发版的修复也会保留。",
+  "下表保留代码提交的短编号、作者时间、当时的 package 版本和提交说明；Git 无法还原每次 push 的实际时间，纯历史文件维护提交不列入表中。版本号表示该提交中的 `package.json` 版本；没有单独发版的修复也会保留。",
   "",
   "| # | 时间 | 版本 | 提交 | 主要改动点 |",
   "| --- | --- | --- | --- | --- |",

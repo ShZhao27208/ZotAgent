@@ -18,3 +18,5 @@ pref("extensions.zotagent.selectionMode", "replace");
 pref("extensions.zotagent.autoSaveNotes", false);
 pref("extensions.zotagent.autoInsertAtCursor", false);
 pref("extensions.zotagent.shortcut", "Ctrl+Shift+Y");
+
+pref("extensions.zotagent.runtimeHost", "auto");

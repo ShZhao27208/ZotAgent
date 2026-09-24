@@ -3,7 +3,7 @@ import { join, dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 
 const STORE_DIR = join(
-  process.env.HOME || "/tmp",
+  process.env.USERPROFILE || process.env.HOME || "/tmp",
   ".local/share/zotero-full-agent",
 );
 const STORE_PATH = join(STORE_DIR, "sessions.json");

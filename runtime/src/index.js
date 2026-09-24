@@ -36,6 +36,10 @@ import {
 import { shellInvocation, shellCommandName } from "./shell.js";
 
 const config = loadConfig();
+if (process.platform === "win32") {
+  const { dirname, delimiter } = await import("node:path");
+  process.env.Path = [dirname(process.execPath), process.env.APPDATA ? join(process.env.APPDATA, "npm") : "", process.env.Path || process.env.PATH || ""].filter(Boolean).join(delimiter);
+}
 let adapters = createAdapters(config.executables, config.platforms);
 const running = new Map();
 
@@ -68,7 +72,7 @@ function validateRunRequest(body) {
 }
 
 const TEMP_DIR = join(
-  process.env.HOME || "/tmp",
+  process.env.USERPROFILE || process.env.HOME || "/tmp",
   ".local/share/zotero-full-agent/tmp",
 );
 
@@ -238,7 +242,7 @@ function collectVersion(adapter, agent) {
       resolve({
         available: code === 0,
         version: stdoutOutput.trim().split(/\r?\n/).find(Boolean) || stderrOutput.trim().split(/\r?\n/).find(Boolean) || null,
-        executable: invocation.command,
+        executable: adapter.executable,
         shell: config.shell,
       });
     });
@@ -306,6 +310,7 @@ const server = http.createServer(async (request, response) => {
             if (!isAbsolute(str)) {
               process.stderr.write(`[ZotAgent Runtime] skipping non-absolute path for ${name}: ${str}\n`);
             } else {
+              config.commands[name] = str;
               config.executables[name] = name === "claude-code" && !existsSync(str)
                 ? resolveClaudePath()
                 : str;

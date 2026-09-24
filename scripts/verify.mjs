@@ -7,6 +7,7 @@ const packageJSON = JSON.parse(await fs.readFile(path.join(root, "package.json")
 const manifest = JSON.parse(await fs.readFile(path.join(root, "plugin/manifest.json"), "utf8"));
 const required = [
   "plugin/bootstrap.js",
+  "plugin/content/runtime-installer.js",
   "plugin/prefs.js",
   "plugin/content/zot-agent.js",
   "plugin/content/preferences.xhtml",
@@ -20,6 +21,7 @@ for (const file of required) await fs.access(path.join(root, file));
 
 const scripts = [
   "plugin/bootstrap.js",
+  "plugin/content/runtime-installer.js",
   "plugin/content/zot-agent.js",
   "plugin/content/preferences.js",
   "runtime/src/index.js",

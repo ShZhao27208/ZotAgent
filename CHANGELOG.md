@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.7 - 2026-09-24
+
+### Fixes
+
+- Bundle Runtime source and Windows x64/ARM64 node-pty dependencies in the XPI, excluding Node.js and build-machine absolute paths.
+- Install the backend under the Zotero data directory, discover existing Windows Node.js, and launch natively by default. Keep WSL as an explicit manual option.
+- Preserve Windows paths and use the Windows user directory for sessions and temporary files.
+
+### Validation
+
+- Automated installer tests cover a copied XPI, Unicode/spaces in the data path, repeat startup, and missing Node. Actual Zotero Windows installation remains a manual verification.
+
+
 ## 0.3.6 - 2026-09-23
 
 ### Improvements

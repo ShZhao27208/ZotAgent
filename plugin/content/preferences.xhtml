@@ -177,6 +177,11 @@
       data-pref="autoStartRuntime"
     />
     <html:div class="zotagent-pref-grid">
+      <html:label for="zotagent-runtime-host">后端启动位置</html:label>
+      <html:select id="zotagent-runtime-host" data-pref="runtimeHost">
+        <html:option value="auto">自动（Windows 原生，无需 WSL）</html:option>
+        <html:option value="wsl">WSL（手动高级配置）</html:option>
+      </html:select>
       <html:label for="zotagent-runtime-endpoint">Endpoint</html:label>
       <html:input id="zotagent-runtime-endpoint" data-pref="runtimeEndpoint" />
       <html:label for="zotagent-runtime-token">Token</html:label>

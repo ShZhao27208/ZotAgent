@@ -1,0 +1,61 @@
+(function () {
+  function file(path) {
+    const f = Components.classes['@mozilla.org/file/local;1'].createInstance(Components.interfaces.nsIFile);
+    f.initWithPath(path);
+    return f;
+  }
+  function directory(parent, name) {
+    const f = parent.clone(); f.append(name);
+    if (!f.exists()) f.create(Components.interfaces.nsIFile.DIRECTORY_TYPE, 0o700);
+    return f;
+  }
+  function findNode() {
+    const env = Services.env;
+    const configured = Zotero.Prefs.get('extensions.zotagent.runtimeNodePath', true);
+    const candidates = [configured];
+    for (const base of [env.get('NVM_SYMLINK'), ...env.get('PATH').split(';'),
+      env.get('ProgramW6432') + '\\nodejs', env.get('ProgramFiles') + '\\nodejs',
+      env.get('LOCALAPPDATA') + '\\Programs\\nodejs', env.get('VOLTA_HOME') + '\\bin']) {
+      if (base) candidates.push(base.replace(/^"|"$/g, '') + '\\node.exe');
+    }
+    for (const path of candidates) {
+      if (!/^[a-z]:[\\/]/i.test(path || '')) continue;
+      try { const f = file(path); if (f.exists() && f.isFile()) return f.path; } catch (_) {}
+    }
+    throw new Error('未检测到 Windows Node.js。请安装 Node.js 24 或更高版本后重启 Zotero，或在高级设置选择 node.exe；无需安装 WSL。');
+  }
+  Zotero.ZotAgent.prepareWindowsRuntime = async function () {
+    const node = findNode();
+    const manifest = JSON.parse(await Zotero.File.getContentsAsync(this._rootURI + 'manifest.json'));
+    const base = directory(directory(file(Zotero.DataDirectory.dir), 'zotagent'), 'runtime');
+    const target = directory(base, manifest.version);
+    const marker = target.clone(); marker.append('.complete');
+    if (!marker.exists()) {
+      const archive = base.clone(); archive.append('runtime-' + manifest.version + '.zip');
+      await Zotero.File.download(this._rootURI + 'runtime.zip', archive.path);
+      const zip = Components.classes['@mozilla.org/libjar/zip-reader;1'].createInstance(Components.interfaces.nsIZipReader);
+      zip.open(archive);
+      try {
+        const entries = zip.findEntries(null);
+        while (entries.hasMore()) {
+          const name = entries.getNext();
+          const parts = name.split('/').filter(Boolean);
+          if (!parts.length || name.startsWith('/') || parts.some(p => p === '..' || p.includes('\\') || p.includes(':'))) throw new Error('无效 Runtime 包路径');
+          let parent = target;
+          for (const part of parts.slice(0, -1)) parent = directory(parent, part);
+          if (name.endsWith('/')) { directory(parent, parts.at(-1)); continue; }
+          const dest = parent.clone(); dest.append(parts.at(-1));
+          if (dest.exists()) dest.remove(false);
+          zip.extract(name, dest);
+        }
+      } finally { zip.close(); }
+      marker.create(Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 0o600);
+      archive.remove(false);
+    }
+    const script = target.clone(); script.append('src'); script.append('index.js');
+    if (!script.exists()) { marker.remove(false); throw new Error('Runtime 安装不完整，请重新连接以修复'); }
+    Zotero.Prefs.set('extensions.zotagent.runtimeScriptPath', script.path, true);
+    Zotero.Prefs.set('extensions.zotagent.runtimeNodePath', node, true);
+    return { node, script: script.path };
+  };
+})();

@@ -6,7 +6,7 @@ ZotAgent 是一个面向学术阅读与研究工作的 Zotero 插件。它不是
 
 项目同时面向 **Windows 与 WSL** 环境。Agent 可按实际安装位置配置为 Windows 或 WSL 命令，Runtime Host 负责鉴权、进程管理、流式输出和原生终端通信。
 
-当前版本：**0.3.5**
+当前版本：**0.3.7**
 
 ## 为什么使用 ZotAgent
 
@@ -49,7 +49,7 @@ ZotAgent 是一个面向学术阅读与研究工作的 Zotero 插件。它不是
 ### 多 Agent 工作区
 
 9. **一个界面切换三个 Agent**
-   每个对话框都可以在 OpenCode、Codex 和 Claude Code 之间切换。Agent 默认使用各自 CLI 的配置和模型；运行环境默认自动检测，也可以按 Agent 单独选择 Windows 或 WSL。
+   每个对话框都可以在 OpenCode、Codex 和 Claude Code 之间切换。Agent 默认使用各自 CLI 的配置和模型；Windows 默认使用本机后端，WSL 后端需在高级设置中手动启用。
 
 10. **同一文献打开多个对话框**
     可以同时打开多个独立窗口，例如让 Claude Code 总结、Codex 核查论证、OpenCode 组织对比表。PDF 选区会广播到所有接收选区的窗口。
@@ -112,11 +112,12 @@ Zotero PDF / 条目 / 选区 / 截图
 4. 选择 XPI，安装后重启 Zotero。
 5. 打开 `编辑 -> 设置 -> ZotAgent` 查看自动连接和 Agent 检测结果。
 
-本机源码构建的 XPI 会记录构建时的 Runtime 脚本和 Node.js 位置，安装后无需手填当前项目路径。请保留源码目录及其 `node_modules`；XPI 本身不包含 Node.js 或 Runtime 依赖。复制到另一台电脑或移动源码后，需要在设置中更新 Runtime 脚本路径与 Node.js 路径。
+Windows 安装包包含 Runtime 源码和 Windows x64/ARM64 PTY 依赖，不包含 Node.js。首次启动自动解压到 Zotero 数据目录的 `zotagent/runtime/<版本>/`，通过 PATH、常见安装位置查找本机 Node.js 24+ 并保存路径。无需 WSL，也无需保留构建源码目录。
 
-更新时建议退出旧的原生终端并重启 Zotero。如果安装新版本后行为仍与旧版一致，请确认旧 Runtime 没有继续占用 `24119` 端口。
+默认使用 Windows 原生后端。需要原有 WSL 环境的用户可在“后端启动位置”选择 WSL，并保留手动 WSL 路径配置。Windows 与 WSL Agent 的自动跨环境候选选择尚未实现。
 
 ### 从源码构建
+
 
 ```bash
 git clone git@github.com:ShZhao27208/ZotAgent.git
@@ -139,23 +140,9 @@ dist/zotagent-<package.json 中的版本>.xpi
 
 ### Runtime Host
 
-| 设置 | 说明 | 默认值示例 |
-| --- | --- | --- |
-| Endpoint | Zotero 连接 Runtime 的本地地址 | `http://127.0.0.1:24119` |
-| Token | 本地 Bearer Token；留空时插件自动生成 | 自动生成 |
-| Runtime 脚本 | `runtime/src/index.js` 的 WSL 绝对路径 | `/home/user/.../ZotAgent/runtime/src/index.js` |
-| Runtime Node.js | Runtime 使用的 Node.js 可执行文件（高级设置） | 自动检测或绝对路径 |
-| WSL 发行版 | `wsl.exe -d` 使用的发行版名称 | `Ubuntu` |
-| 默认工作目录 | Agent 启动和工具执行目录 | `/home/user` |
+Windows 默认无需填写 Runtime 路径：插件自动安装内置后端并查找本机 Node。安装 Node 后需重启 Zotero刷新 PATH；未检测到时可在高级设置填写 `node.exe` 的 Windows 绝对路径，然后点击“立即启动”。默认只监听本机，Token 自动生成。
 
-保持“启动 Zotero 时自动启动并连接 Runtime”开启，插件会生成 Token 并通过 `wsl.exe` 启动 Runtime。启动时采用 `wsl.exe --exec → env → Node → Runtime` 直接调用，使用明确的 Node.js 路径并显式设置 PATH，连接成功后自动检测 Codex、Claude Code 和 OpenCode，并将可用 CLI 的绝对路径回填到设置。检测范围包括 PATH、当前 Node.js 目录、`~/.local/bin` 和 NVM 安装目录；手动填写的绝对路径会保留。默认工作目录为空时，会从 Runtime 读取其默认目录。也可以点击“立即启动”和“检测连接”检查状态。
-
-需要手动启动时：
-
-```bash
-cd /path/to/ZotAgent
-ZOTAGENT_TOKEN='与插件设置一致的-token' npm run runtime
-```
+“WSL（手动高级配置）”仅供已安装 WSL 的用户选择，需要在 WSL 安装 Node、Runtime 依赖，并指定脚本与 Node 路径。它不是 Windows 安装的前置条件。
 
 ### Agent 命令
 
@@ -227,7 +214,7 @@ Windows CLI 路径只有在自动检测失败时才需要填写；配置后分�
 
 连接检查使用明确的超时，不会无限停留在“正在连接”。默认 `127.0.0.1:24119` 启动后仍无响应时，插件会尝试 `24129`，仅在原 Token 鉴权成功后保存新 Endpoint。自定义 Endpoint 不会自动替换；启动端口始终与本地 Endpoint 一致。设置中粘贴的 `home\用户\...` 路径会转换为 `/home/用户/...`；Linux 路径区分大小写。Runtime 确认主目录不存在且仅大小写不匹配时，插件会采用真实主目录。
 
-确认 Endpoint、Token、WSL 发行版、Node.js 路径和 Runtime 脚本路径正确。若提示 Token 不匹配，通常是旧 Runtime 仍占用端口；停止旧进程后重新启动。
+Windows 默认自动部署后端，请确认已安装 Node.js 24+ 并重启 Zotero；手动 WSL 模式才需要检查发行版和脚本路径。确认 Endpoint 和 Token 正确。若提示 Token 不匹配，通常是旧 Runtime 仍占用端口；停止旧进程后重新启动。
 
 ### Agent 显示不可用
 

@@ -188,3 +188,17 @@ test('bare Node preference resolves to the build-time absolute path', () => {
   assert.equal(prefs.get('runtimeNodePath'), '/opt/nvm/bin/node');
   assert.equal(calls[0].at(-2), '/opt/nvm/bin/node');
 });
+
+test('native Windows startup prepares bundled runtime and passes Unicode paths and token literally', async () => {
+  const { manager, calls, sandbox, prefs } = fixture();
+  sandbox.Zotero.isWin = true;
+  const runtime = { node: 'C:\\Program Files\\nodejs\\node.exe', script: 'C:\\Users\\测试 User\\Zotero\\runtime\\src\\index.js' };
+  let prepared = 0;
+  sandbox.Zotero.ZotAgent.prepareWindowsRuntime = async () => { prepared++; return runtime; };
+  manager.healthy = async () => true;
+  prefs.set('runtimeEndpoint', 'http://127.0.0.1:25100');
+  assert.equal((await manager._startAndWait()).status, 'started');
+  assert.equal(prepared, 1);
+  assert.deepEqual(Array.from(calls[0]), [runtime.script, '--host', '127.0.0.1', '--port', '25100', '--token', "token'with spaces"]);
+  assert.ok(!calls[0].includes('--exec'));
+});

@@ -21,12 +21,18 @@ await fs.rm(distDir, { recursive: true, force: true });
 await fs.mkdir(pluginBuild, { recursive: true });
 await fs.mkdir(distDir, { recursive: true });
 await fs.cp(pluginSource, pluginBuild, { recursive: true });
-// A locally built XPI keeps its runtime source location after Zotero copies it.
-await fs.writeFile(path.join(pluginBuild, "runtime-location.json"), JSON.stringify({
-  script: path.join(root, "runtime/src/index.js"),
-  node: process.execPath,
-  distro: process.env.WSL_DISTRO_NAME || "Ubuntu",
-}));
+// Ship runtime sources and Windows native dependencies, never build-machine paths.
+const runtimeBuild = path.join(buildDir, "runtime");
+await fs.mkdir(runtimeBuild, { recursive: true });
+await fs.cp(path.join(root, "runtime/src"), path.join(runtimeBuild, "src"), { recursive: true });
+await fs.writeFile(path.join(runtimeBuild, "package.json"), JSON.stringify({ type: "module" }));
+const ptySource = path.join(root, "node_modules/node-pty");
+const ptyTarget = path.join(runtimeBuild, "node_modules/node-pty");
+for (const entry of ["package.json", "LICENSE", "lib", "prebuilds/win32-x64", "prebuilds/win32-arm64"]) {
+  await fs.mkdir(path.dirname(path.join(ptyTarget, entry)), { recursive: true });
+  await fs.cp(path.join(ptySource, entry), path.join(ptyTarget, entry), { recursive: true });
+}
+await fs.writeFile(path.join(pluginBuild, "runtime.zip"), createZip(await collectFiles(runtimeBuild)));
 const vendorDir = path.join(pluginBuild, "content/vendor");
 await fs.mkdir(vendorDir, { recursive: true });
 await fs.copyFile(path.join(root, "node_modules/@xterm/xterm/lib/xterm.js"), path.join(vendorDir, "xterm.js"));

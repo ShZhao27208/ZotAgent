@@ -88,6 +88,7 @@
     },
 
     normalizePaths() {
+      if (Zotero.isWin && pref("runtimeHost", "auto") !== "wsl") return;
       for (const name of ["runtimeScriptPath", "runtimeNodePath", "defaultWorkingDirectory", "opencodePath", "codexPath", "claudePath"]) {
         const current = String(pref(name, "")).trim();
         const normalized = windowsToWSLPath(current);
@@ -103,7 +104,7 @@
         if (response.ok) {
           const health = await response.json();
           const incorrectHomeCase = health.cwdExists === false && cwd.toLowerCase() === health.defaultCwd?.toLowerCase();
-          if ((!cwd || incorrectHomeCase) && health.defaultCwd?.startsWith("/")) {
+          if ((!cwd || incorrectHomeCase || (Zotero.isWin && pref("runtimeHost", "auto") !== "wsl" && cwd.startsWith("/"))) && health.defaultCwd && (/^[a-z]:[\\/]/i.test(health.defaultCwd) || health.defaultCwd.startsWith("/"))) {
             setPref("defaultWorkingDirectory", health.defaultCwd);
           }
           return "running";
@@ -128,6 +129,24 @@
     },
 
     launch() {
+      if (this._nativeRuntime) {
+        const address = this.endpoint().match(/^http:\/\/(?:127\.0\.0\.1|localhost)(?::(\d+))?$/);
+        const port = Number(address?.[1] || 80);
+        if (!address || port < 1 || port > 65535) throw new Error("自动启动仅支持本机 HTTP Endpoint");
+        this._launchFailure = null;
+        const executable = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsIFile);
+        executable.initWithPath(this._nativeRuntime.node);
+        const child = Components.classes["@mozilla.org/process/util;1"].createInstance(Components.interfaces.nsIProcess);
+        child.init(executable);
+        const args = [this._nativeRuntime.script, "--host", "127.0.0.1", "--port", String(port), "--token", this.token()];
+        this._launchProcess = child;
+        runtimeProcesses.add(child);
+        (child.runwAsync || child.runAsync).call(child, args, args.length, { observe: () => {
+          runtimeProcesses.delete(child);
+          if (this._launchProcess === child) this._launchFailure = "Windows Runtime 已退出，请检查 Node.js 版本（需要 24+）";
+        } }, false);
+        return;
+      }
       this.normalizePaths();
       this._launchFailure = null;
       let runtimePath = String(pref("runtimeScriptPath", "")).trim();
@@ -228,13 +247,16 @@
     },
 
     async _startAndWait() {
+      if (Zotero.isWin && pref("runtimeHost", "auto") !== "wsl") {
+        this._nativeRuntime = await Zotero.ZotAgent.prepareWindowsRuntime();
+      } else this._nativeRuntime = null;
       this.launch();
       for (let attempt = 0; attempt < 12; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 250));
         if (await this.healthy()) return { status: "started" };
         if (this._launchFailure) break;
       }
-      const error = new Error(this._launchFailure || `Runtime 在 ${this.endpoint()} 无响应；可能是 WSL 端口转发异常`);
+      const error = new Error(this._launchFailure || `Runtime 在 ${this.endpoint()} 无响应；请检查本机端口与 Runtime 启动状态`);
       error.retryPort = true;
       throw error;
     },
@@ -720,15 +742,17 @@
         const opencode = String(pref("opencodePath", "")).trim();
         const codex = String(pref("codexPath", "")).trim();
         const claude = String(pref("claudePath", "")).trim();
-        if (opencode && opencode.startsWith("/")) executables.opencode = opencode;
-        if (codex && codex.startsWith("/")) executables.codex = codex;
-        if (claude && claude.startsWith("/")) executables["claude-code"] = claude;
+        const nativeWindows = Zotero.isWin && pref("runtimeHost", "auto") !== "wsl";
+        const validPath = value => nativeWindows ? /^[a-z]:[\\/]/i.test(value) : value.startsWith("/");
+        if (opencode && validPath(opencode)) executables.opencode = opencode;
+        if (codex && validPath(codex)) executables.codex = codex;
+        if (claude && validPath(claude)) executables["claude-code"] = claude;
         const opP = String(pref("opencodePlatform", "auto"));
         const cxP = String(pref("codexPlatform", "auto"));
         const clP = String(pref("claudePlatform", "auto"));
-        if (opP === "wsl" || opP === "windows") platforms.opencode = opP;
-        if (cxP === "wsl" || cxP === "windows") platforms.codex = cxP;
-        if (clP === "wsl" || clP === "windows") platforms["claude-code"] = clP;
+        if (!nativeWindows && (opP === "wsl" || opP === "windows")) platforms.opencode = opP;
+        if (!nativeWindows && (cxP === "wsl" || cxP === "windows")) platforms.codex = cxP;
+        if (!nativeWindows && (clP === "wsl" || clP === "windows")) platforms["claude-code"] = clP;
         if (!Object.keys(executables).length && !Object.keys(platforms).length) {
           // skip POST, go straight to fetching detected paths
         } else {
@@ -753,7 +777,7 @@
           for (const [name, info] of Object.entries(agents)) {
             if (!info.available || !info.executable || !prefMap[name]) continue;
             const current = String(pref(prefMap[name], "")).trim();
-            if (!current || !current.startsWith("/")) {
+            if (!current || (Zotero.isWin && pref("runtimeHost", "auto") !== "wsl" ? !/^[a-z]:[\\/]/i.test(current) : !current.startsWith("/"))) {
               setPref(prefMap[name], info.executable);
             }
           }

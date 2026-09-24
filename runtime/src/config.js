@@ -5,6 +5,7 @@ import { join, delimiter, dirname } from "node:path";
 import { shellDescriptor } from "./shell.js";
 
 export function resolveClaudePath() {
+  if (process.platform === "win32") return resolveFromPath("claude");
   const native = resolveFromPath("claude");
   if (native !== "claude") return native;
   // Scan NVM global modules for legacy Claude Code installations
@@ -37,9 +38,10 @@ export function resolveClaudePath() {
 }
 
 export function resolveFromPath(command, env = process.env, nodePath = process.execPath) {
-  const home = env.HOME || "/tmp";
+  const home = env.USERPROFILE || env.HOME || "/tmp";
   const directories = [
     ...(env.PATH || "").split(delimiter).filter(Boolean),
+    ...(env.APPDATA ? [join(env.APPDATA, "npm")] : []),
     dirname(nodePath), join(home, ".local/bin"), join(home, ".npm-global/bin"),
     join(home, ".opencode/bin"), "/usr/local/bin", "/usr/bin",
   ];
@@ -50,11 +52,10 @@ export function resolveFromPath(command, env = process.env, nodePath = process.e
     }
   } catch {}
   for (const directory of directories) {
-    const candidate = join(directory, command);
-    try {
-      accessSync(candidate, constants.X_OK);
-      return candidate;
-    } catch {}
+    for (const suffix of process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""]) {
+      const candidate = join(directory, command + suffix);
+      try { accessSync(candidate, constants.X_OK); return candidate; } catch {}
+    }
   }
   return command;
 }
@@ -89,7 +90,7 @@ export function loadConfig() {
     token,
     generatedToken,
     shell: shellDescriptor(),
-    defaultCwd: process.env.ZOTAGENT_CWD || (process.platform === "win32" ? process.cwd() : process.env.HOME || "/tmp"),
+    defaultCwd: process.env.ZOTAGENT_CWD || (process.platform === "win32" ? process.env.USERPROFILE || process.cwd() : process.env.HOME || "/tmp"),
     defaultWindowsCwd: process.env.ZOTAGENT_WIN_CWD || process.env.USERPROFILE || (process.platform === "win32" ? process.cwd() : "/mnt/c/Users"),
     executables: {
       opencode: process.env.ZOTAGENT_OPENCODE || DEFAULT_PATHS.opencode,
