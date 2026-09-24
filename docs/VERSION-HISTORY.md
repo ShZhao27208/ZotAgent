@@ -2,15 +2,16 @@
 
 > 本文件记录本地可见的 Git 历史（含推送前待发布提交），不代表 GitHub 每次 push 的事件日志。每次推送前运行 `npm run version-history`；本地 `.githooks/pre-push` 会在历史变化且文件未更新时阻止推送。
 
-- 历史截至：2026-09-24T17:12:17+08:00
+- 历史截至：2026-09-24T22:12:38+08:00
 - 项目：`ShZhao27208/ZotAgent`
-- 可见提交：54 个（按 Git 提交时间升序）
+- 可见提交：55 个（按 Git 提交时间升序）
 - 时间：ISO 8601，带时区
 
 ## 远端分支与标签
 
 | 引用 | 提交 | 时间 | 说明 |
 | --- | --- | --- | --- |
+| `v0.3.10` | `06d43a68b2a6` | 2026-09-24T22:12:38+08:00 | fix(windows): preserve CMD wrapper arguments for agent execution v0.3.10 |
 | `v0.3.3` | `848e20b78a43` | 2026-09-21T01:20:06+08:00 | chore: release v0.3.3 |
 | `v0.3.4` | `5dc2fbc8d487` | 2026-09-21T01:35:57+08:00 | chore: release v0.3.4 |
 | `v0.3.5` | `878cd563b291` | 2026-09-21T01:52:35+08:00 | chore: release v0.3.5 |
@@ -40,6 +41,7 @@
 | `0.3.3` | 2026-09-21 | `848e20b` | 安装后 XPI 保留 Runtime 来源；自动发现 CLI、初始化 NVM、同步 Agent 路径和默认工作目录。 |
 | `0.3.4` | 2026-09-21 | `5dc2fbc` | 增加连接超时、路径规范化、`wsl.exe --exec` 启动、主目录大小写修复和早退诊断。 |
 | `0.3.5` | 2026-09-21 | `878cd56` | 恢复直接 `env → Node → Runtime` 启动；传递自定义端口；默认端口失败时经鉴权回退到 `24129`。 |
+| `0.3.10` | 2026-09-24T22:12:38+08:00 | `06d43a6` | fix(windows): preserve CMD wrapper arguments for agent execution v0.3.10 |
 | `0.3.6` | 2026-09-23T02:46:01+08:00 | `52ba74fad437` | CLI Shell 启动、默认模型信息和版本维护；安装启动仍依赖外部 Runtime。 |
 | `0.3.7` | 2026-09-24T16:43:22+08:00 | `9ecca53` | XPI 内置 Runtime 与 Windows PTY，自动部署本机后端并复用已有 Node，无需 WSL。 |
 | `0.3.8` | 2026-09-24T16:59:59+08:00 | `8864a74` | fix(installer): extract local XPI without download URI credentials v0.3.8 |
@@ -105,6 +107,7 @@
 | 52 | 2026-09-24T16:43:22+08:00 | `0.3.7` | `9ecca53` | fix(windows): bundle runtime and bootstrap with installed Node v0.3.7 |
 | 53 | 2026-09-24T16:59:59+08:00 | `0.3.8` | `8864a74` | fix(installer): extract local XPI without download URI credentials v0.3.8 |
 | 54 | 2026-09-24T17:12:17+08:00 | `0.3.9` | `78a69b4` | fix(installer): use bootstrap version instead of jar manifest HTTP read v0.3.9 |
+| 55 | 2026-09-24T22:12:38+08:00 | `0.3.10` | `06d43a6` | fix(windows): preserve CMD wrapper arguments for agent execution v0.3.10 |
 
 ## 维护规则
 
