@@ -101,12 +101,13 @@
         ? "Runtime 自动启动已关闭，可点击立即启动"
         : "Runtime 已连接，Agent 路径已自动检测";
     }).catch((error) => {
+      refreshDetectedFields(doc);
       if (status) status.textContent = "自动连接失败: " + error.message;
     });
 
     doc.querySelector("#zotagent-start-runtime")?.addEventListener("command", async () => {
       const result = doc.querySelector("#zotagent-runtime-result");
-      result.textContent = "正在启动 WSL Runtime...";
+      result.textContent = get("runtimeHost") === "wsl" ? "正在启动 WSL Runtime..." : "正在部署并启动本机 Runtime...";
       try {
         const state = await Zotero.ZotAgent.runtimeManager.ensureRunning(true);
         refreshDetectedFields(doc);
@@ -116,6 +117,7 @@
           ? "Runtime 已在运行，连接正常"
           : "Runtime 已启动并通过鉴权检测";
       } catch (error) {
+        refreshDetectedFields(doc);
         result.textContent = "启动失败: " + error.message;
       }
     });

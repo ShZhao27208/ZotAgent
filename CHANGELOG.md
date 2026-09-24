@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.8 - 2026-09-24
+
+### Fixes
+
+- Extract the embedded Runtime directly from the local XPI instead of using the download helper, avoiding unsupported jar URI credential access (`nsIURI.username`).
+- Correct Windows startup wording and refresh automatically saved paths even if the subsequent connection fails.
+- Add regression coverage that rejects HTTP download/URI credential access for packaged resources. Real Windows Zotero verification is still pending.
+
 ## 0.3.7 - 2026-09-24
 
 ### Fixes

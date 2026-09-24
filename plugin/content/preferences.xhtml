@@ -170,7 +170,7 @@
 
   <groupbox>
     <label><html:h2>Runtime</html:h2></label>
-    <html:p class="zotagent-help">插件会在首次启动时生成安全 Token，并自动通过 WSL 启动 Runtime。自动启动失败时仍可手动启动。</html:p>
+    <html:p class="zotagent-help">插件会在首次启动时生成安全 Token。Windows 默认自动部署内置 Runtime、填写本机路径并使用已有 Node.js 启动；仅手动选择 WSL 时使用 WSL。</html:p>
     <checkbox
       id="zotagent-auto-start-runtime"
       label="启动 Zotero 时自动启动并连接 Runtime"

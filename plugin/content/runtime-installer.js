@@ -32,7 +32,21 @@
     const marker = target.clone(); marker.append('.complete');
     if (!marker.exists()) {
       const archive = base.clone(); archive.append('runtime-' + manifest.version + '.zip');
-      await Zotero.File.download(this._rootURI + 'runtime.zip', archive.path);
+      // This is a local XPI resource, not an HTTP download. Zotero's download
+      // helper can read URI credentials, which jar: URIs do not support.
+      if (archive.exists()) archive.remove(false);
+      const uri = Services.io.newURI(this._rootURI + 'runtime.zip');
+      if (uri.scheme === 'jar') {
+        const jar = uri.QueryInterface(Components.interfaces.nsIJARURI);
+        const source = jar.JARFile.QueryInterface(Components.interfaces.nsIFileURL).file;
+        const outer = Components.classes['@mozilla.org/libjar/zip-reader;1'].createInstance(Components.interfaces.nsIZipReader);
+        outer.open(source);
+        try { outer.extract(jar.JAREntry, archive); } finally { outer.close(); }
+      } else if (uri.scheme === 'file') {
+        uri.QueryInterface(Components.interfaces.nsIFileURL).file.copyTo(base, archive.leafName);
+      } else {
+        throw new Error('不支持的插件资源位置：' + uri.scheme);
+      }
       const zip = Components.classes['@mozilla.org/libjar/zip-reader;1'].createInstance(Components.interfaces.nsIZipReader);
       zip.open(archive);
       try {
