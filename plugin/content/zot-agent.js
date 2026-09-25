@@ -136,7 +136,7 @@
           this._health = health;
           if ((health.platform || health.shell?.platform) !== this.desiredPlatform()) return "wrong-environment";
           if (this.desiredPlatform() === "wsl" && health.wslDistro && health.wslDistro !== String(pref("wslDistro", "Ubuntu"))) return "wrong-environment";
-          if (Number(health.protocolVersion || 0) < 3) return "outdated";
+          if (Number(health.protocolVersion || 0) < 4) return "outdated";
           const incorrectHomeCase = health.cwdExists === false && cwd.toLowerCase() === health.defaultCwd?.toLowerCase();
           if ((!cwd || incorrectHomeCase || (Zotero.isWin && pref("runtimeHost", "auto") !== "wsl" && cwd.startsWith("/"))) && health.defaultCwd && (/^[a-z]:[\\/]/i.test(health.defaultCwd) || health.defaultCwd.startsWith("/"))) {
             setPref("defaultWorkingDirectory", health.defaultCwd);
@@ -928,6 +928,7 @@
       this.id = `zotagent-window-${Date.now()}-${++dialogSequence}`;
       this.agent = String(pref("defaultAgent", "claude-code"));
       this.sessions = Object.create(null);
+      this.sessionDirectories = Object.create(null);
       this.messages = [];
       this.requestID = null;
       this._requestState = "idle";
@@ -967,7 +968,7 @@
         agent.appendChild(option);
       }
       agent.addEventListener("change", () => {
-        if (this._requestState !== "idle") {
+        if (this._requestState !== "idle" || this._ptyMode || this._ptySwitching) {
           agent.value = this.agent;
           this.renderStatus("请求进行中，无法切换 Agent");
           return;
@@ -1043,6 +1044,15 @@
 
       this.archiveBar = createElement(this.doc, "div", "zotagent-archive-bar");
       this.archiveLabel = createElement(this.doc, "span", "zotagent-archive-label", "本次不会自动归档");
+      this.archiveSelect = createElement(this.doc, "select", "zotagent-archive-select");
+      this.archiveSelect.setAttribute("aria-label", "后续对话保存到的子笔记");
+      this.archiveSelect.addEventListener("change", async () => {
+        const document = Zotero.ZotAgent.archiveFormat.documentSnapshot(this.context?.topItem);
+        if (!document) return;
+        try { await Zotero.ZotAgent.archive.selectTarget(document, this.archiveSelect.value); this.updateArchiveBar("后续提问将保存到所选笔记"); }
+        catch (error) { this._noteListSignature = null; this.updateArchiveBar(); this.renderStatus("无法切换归档笔记：" + error.message, true); }
+      });
+      this.archiveSelect.addEventListener("focus", () => this.updateArchiveBar());
       const openArchive = createElement(this.doc, "button", "zotagent-small-button", "打开");
       openArchive.addEventListener("click", () => this.archiveAction("open"));
       const newArchive = createElement(this.doc, "button", "zotagent-small-button", "新建");
@@ -1054,7 +1064,7 @@
       exportArchive.title = "导出 Markdown 和截图";
       this.archiveRetry = createElement(this.doc, "button", "zotagent-small-button", "重试归档");
       this.archiveRetry.addEventListener("click", () => this.archiveAction("retry"));
-      this.archiveBar.append(this.archiveLabel, openArchive, newArchive, exportArchive, this.archiveRetry);
+      this.archiveBar.append(this.archiveLabel, this.archiveSelect, openArchive, newArchive, exportArchive, this.archiveRetry);
       this.fullTextStatus = createElement(this.doc, "div", "zotagent-fulltext-status");
 
       this.messagesElement = createElement(this.doc, "div", "zotagent-messages");
@@ -1071,7 +1081,7 @@
       this.stopButton = createElement(this.doc, "button", "zotagent-secondary-button", "停止");
       this.stopButton.disabled = true;
       this.stopButton.addEventListener("click", () => this.stop());
-      const modeToggle = createElement(this.doc, "button", "zotagent-secondary-button", "打开原生终端");
+      const modeToggle = this.modeToggle = createElement(this.doc, "button", "zotagent-secondary-button", "打开原生终端");
       modeToggle.title = "打开当前 Agent 的原生交互终端";
       modeToggle.addEventListener("click", () => this.togglePtyMode());
       composer.append(this.promptInput, this.sendButton, this.stopButton, modeToggle);
@@ -1087,7 +1097,11 @@
           this.ptyInput.value = "";
         }
       });
-      this.ptyContainer.append(this.ptyOutput, this.ptyInput);
+      this.terminalInfo = createElement(this.doc, "details", "zotagent-terminal-info");
+      const terminalSummary = createElement(this.doc, "summary", "", "会话信息与恢复方法");
+      this.terminalInfoText = createElement(this.doc, "div");
+      this.terminalInfo.append(terminalSummary, this.terminalInfoText);
+      this.ptyContainer.append(this.terminalInfo, this.ptyOutput, this.ptyInput);
 
       const actions = createElement(this.doc, "footer", "zotagent-actions");
       const copy = createElement(this.doc, "button", "zotagent-small-button", "复制 Markdown");
@@ -1174,15 +1188,31 @@
     updateArchiveBar(message = "") {
       if (this._destroyed || !this.archiveLabel) return;
       const document = Zotero.ZotAgent.archiveFormat?.documentSnapshot(this.context?.topItem);
-      if (!document) { this.archiveLabel.textContent = "本次不会自动归档：未绑定主文献"; this.archiveRetry.hidden = true; return; }
+      this.archiveSelect.hidden = !document;
+      if (!document) { this.archiveLabel.textContent = "本次不会自动归档：未绑定主文献"; this.archiveLabel.title = this.archiveLabel.textContent; this.archiveRetry.hidden = true; return; }
       const archive = Zotero.ZotAgent.archive;
       const target = archive?.current(document);
       let title = "准备中";
       if (target) { try { title = archive.resolve(target).getNoteTitle(); } catch { title = "原笔记不可用，请新建"; } }
       const failed = [...(archive?.pending.values() || [])].filter(e => e.record.primaryDocument.key === document.key && e.record.primaryDocument.libraryID === document.libraryID).length;
       this.archiveRetry.hidden = !failed;
-      this.archiveLabel.textContent = `记忆：${title}${message ? " · " + message : failed ? ` · ${failed} 条待归档，可重试` : ""}`;
-      this.archiveLabel.title = this.archiveLabel.textContent;
+      const notes = archive?.listNotes(document) || [];
+      const signature = JSON.stringify([target?.noteKey, notes.map(note => [note.noteKey, note.title, note.archive])]);
+      if (signature !== this._noteListSignature) {
+        this._noteListSignature = signature;
+        this.archiveSelect.replaceChildren();
+        if (!notes.some(note => note.noteKey === target?.noteKey)) {
+          const empty = createElement(this.doc, "option", "", "选择保存笔记…"); empty.value = ""; empty.selected = true; this.archiveSelect.append(empty);
+        }
+        for (const note of notes) {
+          const option = createElement(this.doc, "option", "", note.title + (note.archive ? " · 归档" : ""));
+          option.value = note.noteKey; option.selected = note.noteKey === target?.noteKey; this.archiveSelect.append(option);
+        }
+      }
+      this.archiveLabel.textContent = `子笔记 ${notes.length}${failed ? " ⚠" : ""}`;
+      this.archiveSelect.title = `保存到：${title}。切换仅影响后续提问；当前任务仍保存到原笔记。`;
+      this.archiveLabel.title = message || (failed ? `${failed} 条待归档，可重试` : `主文献下共 ${notes.length} 个子笔记`);
+      if (/失败|错误|不可用/.test(message)) this.renderStatus(message, true);
     }
 
     async archiveAction(action) {
@@ -1760,6 +1790,7 @@
 
     async send() {
       const question = this.promptInput.value.trim();
+      if (this._ptyMode || this._ptySwitching) { this.renderStatus("请在原生终端输入，或先返回对话后发送", true); return; }
       if (!question || this._requestState !== "idle") return;
       this.updateContext();
       const format = Zotero.ZotAgent.archiveFormat;
@@ -1854,6 +1885,7 @@
         const result = await this.runtime.run(payload, event => {
           if (!visible() || batch.cancelled || event.requestID !== request.id) return;
           if (event.type === "request.started") {
+            request.cwd = event.data?.cwd || batch.cwd;
             for (const entry of request.fullTextAttachments) if (entry.extractedChars) entry.state = "received";
           }
           if (event.type === "input.submitted") {
@@ -1864,7 +1896,8 @@
             request.nativeSessionID = event.nativeSessionID;
             if (!batch.separate) {
               this.sessions[batch.agent] = event.nativeSessionID;
-              SessionHistory.upsert({ agent: batch.agent, nativeSessionID: event.nativeSessionID, windowID: this.id, cwd: batch.cwd,
+              this.sessionDirectories[batch.agent] = request.cwd || batch.cwd;
+              SessionHistory.upsert({ agent: batch.agent, nativeSessionID: event.nativeSessionID, windowID: this.id, cwd: request.cwd || batch.cwd,
                 title: batch.primaryDocument?.title || "普通聊天", documentKey: batch.primaryDocument?.key || null,
                 documentLibraryID: batch.primaryDocument?.libraryID ?? null,
                 references: batch.references.map(d => ({ libraryID: d.libraryID, key: d.key })),
@@ -2054,9 +2087,10 @@
     }
 
     restoreSession(entry) {
-      if (this._requestState !== "idle") { this.renderStatus("请先停止当前任务再恢复历史会话", true); return; }
+      if (this._requestState !== "idle" || this._ptyMode || this._ptySwitching) { this.renderStatus("请先停止当前任务并返回结构化对话，再恢复历史会话", true); return; }
       this.agent = entry.agent;
       this.sessions[entry.agent] = entry.nativeSessionID;
+      this.sessionDirectories[entry.agent] = entry.cwd || "";
       if (entry.cwd) this.cwdInput.value = entry.cwd;
       const agentSelect = this.element.querySelector(".zotagent-agent-select");
       if (agentSelect) agentSelect.value = entry.agent;
@@ -2148,21 +2182,35 @@
     }
 
     async togglePtyMode() {
-      if (this._ptyMode) {
-        this._ptyMode = false;
-        this.ptyContainer.style.display = "none";
-        this.messagesElement.style.display = "";
-        this.selectionBox.style.display = "";
-        this.renderStatus("已切换回结构化视图");
-        if (this._ptyID) await this.closePty();
-      } else {
-        this._ptyMode = true;
-        this.ptyContainer.style.display = "";
-        this.messagesElement.style.display = "none";
-        this.selectionBox.style.display = "none";
-        const label = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" }[this.agent] || this.agent;
-        this.renderStatus(`${label} 原生终端`);
-        await this.startPty();
+      if (this._ptySwitching) return;
+      if (this._requestState !== "idle") { this.renderStatus("请等待当前回答结束，或点击停止后再打开原生终端", true); return; }
+      this._ptySwitching = true;
+      this.modeToggle.disabled = true;
+      try {
+        if (this._ptyMode) {
+          this._ptyMode = false;
+          this.ptyContainer.style.display = "none";
+          this.messagesElement.style.display = "";
+          this.selectionBox.style.display = "";
+          this.renderStatus("已切换回结构化视图");
+          await this.closePty();
+        } else {
+          this._ptyMode = true;
+          this.ptyContainer.style.display = "";
+          this.messagesElement.style.display = "none";
+          this.selectionBox.style.display = "none";
+          const label = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" }[this.agent] || this.agent;
+          this.renderStatus(`${label} 原生终端`);
+          await this.startPty();
+        }
+      } finally {
+        this._ptySwitching = false;
+        this.modeToggle.disabled = false;
+        this.modeToggle.textContent = this._ptyMode ? "返回对话" : "打开原生终端";
+        this.promptInput.disabled = Boolean(this._ptyMode);
+        this.sendButton.disabled = Boolean(this._ptyMode);
+        this.cwdInput.disabled = Boolean(this._ptyMode);
+        this.element.querySelector(".zotagent-agent-select").disabled = Boolean(this._ptyMode);
       }
     }
 
@@ -2170,6 +2218,7 @@
       try {
         await RuntimeManager.ensureRunning();
         await this.controller.xtermReady;
+        if (this._destroyed) return;
         const Terminal = this.controller.xtermTerminal;
         if (typeof Terminal !== "function") throw new Error("终端渲染器加载失败");
         this._terminal?.dispose();
@@ -2189,7 +2238,7 @@
             headers: this.runtime.headers(),
             body: JSON.stringify({
               agent: this.agent,
-              cwd: this.cwdInput.value.trim() || pref("defaultWorkingDirectory", ""),
+              cwd: this.sessions[this.agent] ? this.sessionDirectories[this.agent] || this.cwdInput.value.trim() || pref("defaultWorkingDirectory", "") : this.cwdInput.value.trim() || pref("defaultWorkingDirectory", ""),
               sessionID: this.sessions[this.agent] || null,
               cols: this._terminal.cols,
               rows: this._terminal.rows,
@@ -2197,9 +2246,11 @@
           }),
           new Promise((_, reject) => setTimeout(() => reject(new Error("PTY 创建超时")), 8000)),
         ]);
-        if (!response.ok) throw new Error(`PTY 创建失败: ${response.status}`);
+        if (!response.ok) throw new Error(`终端创建失败: ${response.status} · ${await response.text()}`);
         const data = await response.json();
         this._ptyID = data.ptyID;
+        if (this._destroyed) { await this.closePty(); return; }
+        this.showTerminalInfo(data);
         this.ptyInput.style.display = "none";
         this._terminal.focus();
         if (this.win.ResizeObserver) {
@@ -2214,9 +2265,24 @@
       } catch (error) {
         this._terminal?.dispose();
         this._terminal = null;
+        this._ptyMode = false;
+        this.ptyContainer.style.display = "none";
+        this.messagesElement.style.display = "";
+        this.selectionBox.style.display = "";
         this.ptyInput.style.display = "";
         this.renderStatus("原生终端启动失败: " + error.message, true);
       }
+    }
+
+    showTerminalInfo(data) {
+      const id = data.nativeSessionID;
+      const command = id && this.agent === "codex" ? `codex resume ${id}` : id && this.agent === "claude-code" ? `claude --resume ${id}` : "未指定会话 ID，打开的是独立原生终端。";
+      const lines = [id ? `恢复会话：${id}` : "独立原生会话", `环境：${data.platform || "未知"}${data.wslDistro ? ` / ${data.wslDistro}` : ""}`,
+        `工作目录：${data.cwd}`, `CLI：${data.executable || ""}`, command,
+        "请在相同环境和上述工作目录执行恢复命令；恢复不会重新提交 PDF 全文。原生终端中的新增消息不会自动归档。"];
+      if (this.agent === "codex") lines.push("查看包含结构化会话的列表：codex resume --all --include-non-interactive", "手动停止后出现 Conversation interrupted 属正常中断记录；可以在终端继续提问。");
+      this.terminalInfoText.textContent = lines.join("\n");
+      this.terminalInfo.title = id ? `会话 ${id}` : "当前未恢复结构化会话";
     }
 
     async streamPtyOutput() {

@@ -46,9 +46,8 @@ export class ClaudeAdapter extends AgentAdapter {
   get supportsImages() { return true; }
 
   interactiveArgs(sessionID, cwd) {
-    // Start the native TUI directly. Structured-session IDs are not guaranteed
-    // to be resumable by an interactive Claude process.
-    return { args: [], cwd };
+    // --print sessions are persisted by the CLI and can be resumed by ID.
+    return { args: sessionID ? ["--resume", sessionID] : [], cwd };
   }
 
   sessionDirectory() {

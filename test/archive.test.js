@@ -93,3 +93,70 @@ test('native legacy note wrapper preserves old records, sorting, and idempotency
   await f.archive.reorderCurrent('ended');
   assert.equal(f.format.recordsIn(f.archive.parse(note.getNote())).map(r=>r.meta.id).join(','),'late,early');
 });
+
+async function childNote(f,parent,title='Existing note') {
+  const note=new f.Zotero.Item('note');note.parentID=parent.id;note.libraryID=parent.libraryID;
+  note.setNote('<h1>'+title+'</h1><p>My manual content</p>');await note.save();return note;
+}
+test('existing child notes are counted, selectable, and append keeps user content and in-flight destination',async()=>{
+  const f=fixture(),p=await f.paper(),doc=f.format.documentSnapshot(p);
+  const manual=await childNote(f,p),deleted=await childNote(f,p,'deleted');deleted.deleted=true;
+  const other=await f.paper('Other'),foreign=await childNote(f,other);
+  const original=await f.archive.targetFor(doc);
+  assert.equal(f.archive.listNotes(doc).length,2);
+  const next=f.archive.selectTarget(doc,manual.key);
+  const nextQuestion=f.archive.targetFor(doc);
+  assert.equal((await nextQuestion).noteKey,manual.key);
+  await f.archive.save(f.record(p,'old-question'),original);
+  await f.archive.save(f.record(p,'new-question'),next);
+  assert.match(manual.getNote(),/My manual content/);
+  assert.equal(f.format.recordsIn(f.archive.parse(manual.getNote()))[0].meta.id,'new-question');
+  assert.equal(f.format.recordsIn(f.archive.parse(f.archive.resolve(original).getNote()))[0].meta.id,'old-question');
+  assert.equal(f.archive.current(doc).noteKey,manual.key);
+  await assert.rejects(f.archive.selectTarget(doc,foreign.key),/删除或移动/);
+  await assert.rejects(f.archive.selectTarget(doc,deleted.key),/删除或移动/);
+  assert.equal(f.archive.current(doc).noteKey,manual.key);
+});
+test('existing synced archive is discovered when device has no target mapping',async()=>{
+  const f=fixture(),p=await f.paper(),doc=f.format.documentSnapshot(p);
+  const earlier=await f.archive.targetFor(doc);await f.archive.save(f.record(p),earlier);
+  f.prefs.delete('extensions.zotagent.archiveTargets');
+  const before=f.counts().writes;
+  assert.equal((await f.archive.targetFor(doc)).noteKey,earlier.noteKey);
+  assert.equal(f.counts().writes,before);
+});
+test('all windows reflect selected target and renamed or removed child notes through Zotero notifier',async()=>{
+  const f=fixture(),p=await f.paper(),doc=f.format.documentSnapshot(p);
+  let observer,unregistered=false;
+  f.Zotero.Notifier={registerObserver:o=>(observer=o,17),unregisterObserver:id=>{assert.equal(id,17);unregistered=true;}};
+  const a=f.dialog(p),b=f.dialog(p);await f.archive.drain();
+  const manual=await childNote(f,p);
+  observer.notify();assert.match(a.archiveLabel.textContent,/2/);
+  await f.archive.selectTarget(doc,manual.key);
+  for(const dialog of [a,b])assert.equal(dialog.archiveSelect.value,manual.key);
+  manual.setNote('<h1>Renamed by user</h1>');observer.notify();
+  assert.match(a.archiveSelect.textContent,/Renamed by user/);
+  manual.deleted=true;observer.notify();assert.doesNotMatch(a.archiveSelect.textContent,/Renamed by user/);
+  a.destroy();assert.equal(unregistered,false);b.destroy();assert.equal(unregistered,true);
+});
+test('native color spans distinguish metadata while archive parsing and Markdown export keep labels',()=>{
+  const f=fixture();const record={id:'styled',agent:'codex',status:'completed',submittedAt:1,endedAt:2,question:'Q',answer:'Answer',primaryDocument:{title:'Paper',link:'zotero://select/library/items/KEY'}};
+  const html=f.format.renderRecord(record,[],text=>'<p>'+text+'</p>'),doc=f.archive.parse(html);
+  assert.match(doc.querySelector('h2 span').getAttribute('style'),/color:/);
+  assert.equal(f.format.recordsIn(doc).length,1);
+  const md=f.Zotero.ZotAgent.archiveExport.toMarkdown(doc);
+  for(const text of ['Agent · Codex','提问时间：','主文献：','Answer']) assert.ok(md.includes(text));
+});
+
+test('failed target selection restores the dropdown to the actual previous destination',async()=>{
+  const f=fixture(),p=await f.paper(),dialog=f.dialog(p);await f.archive.drain();
+  const doc=f.format.documentSnapshot(p),original=f.archive.current(doc);
+  const manual=await childNote(f,p);dialog.updateArchiveBar();
+  for(const option of dialog.archiveSelect.options) option.selected=option.value===manual.key;
+  f.Zotero.Libraries.get=()=>({editable:false});
+  dialog.archiveSelect.dispatchEvent(new f.window.document.defaultView.Event('change'));
+  await f.archive.drain();await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(f.archive.current(doc).noteKey,original.noteKey);
+  assert.equal(dialog.archiveSelect.value,original.noteKey);
+  assert.match(dialog.statusElement.textContent,/无法切换归档笔记/);
+});

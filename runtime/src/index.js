@@ -98,9 +98,17 @@ function terminateProcess(child) {
   }
 }
 
+function assertSessionIdle(agent, nativeSessionID) {
+  if (!nativeSessionID) return;
+  const active = [...running.values()].some(entry => entry.request.agent === agent && entry.request.nativeSessionID === nativeSessionID);
+  const terminal = listPtySessions().some(session => session.alive && session.agent === agent && session.nativeSessionID === nativeSessionID);
+  if (active || terminal) throw new Error("该会话仍在执行、停止中或已在原生终端打开，请等待任务退出或先关闭原生终端");
+}
+
 async function runAgent(request, response) {
   const location = await launcher.resolve(request.agent);
   if (response.destroyed || response.writableEnded) return;
+  assertSessionIdle(request.agent, request.nativeSessionID);
   if (location.platform === "wsl" && process.platform === "win32") {
     request.cwd = request.cwd === config.defaultCwd ? location.defaultCwd : toWSLPath(request.cwd);
     if (!request.cwd.startsWith("/")) request.cwd = location.defaultCwd;
@@ -324,7 +332,7 @@ const server = http.createServer(async (request, response) => {
       }
       writeJSON(response, 200, {
         status: "ok",
-        protocolVersion: 3,
+        protocolVersion: 4,
         platform: nativePlatform,
         wslDistro: process.env.WSL_DISTRO_NAME || null,
         cwdExists,
@@ -444,10 +452,15 @@ const server = http.createServer(async (request, response) => {
       let cwd = String(body.cwd || "") || location.defaultCwd;
       if (location.platform === "wsl" && process.platform === "win32") cwd = cwd === config.defaultCwd ? location.defaultCwd : toWSLPath(cwd);
       if (!pathMatchesPlatform(cwd, location.platform)) cwd = location.defaultCwd;
-      const interactive = adapter.interactiveArgs(body.sessionID || null, cwd);
+      const nativeSessionID = body.sessionID ? String(body.sessionID) : null;
+      assertSessionIdle(agent, nativeSessionID);
+      const interactive = adapter.interactiveArgs(nativeSessionID, cwd);
       const ptyInvocation = launcher.invocation(location, interactive, agent);
       const session = createPtySession(ptyInvocation.command, ptyShellArgs(ptyInvocation), ptyInvocation.cwd, {}, { cols: body.cols, rows: body.rows });
-      writeJSON(response, 200, { ptyID: session.id, agent, cwd });
+      const resumedID = agent === "opencode" ? null : nativeSessionID;
+      session.agent = agent; session.nativeSessionID = resumedID;
+      writeJSON(response, 200, { ptyID: session.id, agent, cwd, nativeSessionID: resumedID,
+        platform: location.platform, wslDistro: location.distro || (location.platform === "wsl" ? process.env.WSL_DISTRO_NAME || null : null), executable: location.executable });
       return;
     }
     if (request.method === "POST" && url.pathname === "/v1/pty/write") {

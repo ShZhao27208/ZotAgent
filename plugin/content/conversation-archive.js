@@ -13,6 +13,32 @@
     task.finally(() => { if (queues.get(key) === task) queues.delete(key); }).catch(() => {});
     return task;
   }
+  let observerID = null;
+  function listNotes(document) {
+    if (!document) return [];
+    const parent = Zotero.Items.getByLibraryAndKey(document.libraryID, document.key);
+    if (!parent || parent.deleted) return [];
+    return (parent.getNotes?.() || []).map(id => Zotero.Items.get(id))
+      .filter(note => note && !note.deleted && note.isNote() && note.parentKey === document.key)
+      .map(note => ({ libraryID: note.libraryID, parentKey: document.key, noteKey: note.key,
+        title: note.getNoteTitle() || "未命名笔记", modified: note.dateModified || "",
+        archive: /id=["']zotagent-record-|ZotAgent 对话历史/.test(note.getNote()),
+      })).sort((a, b) => b.modified.localeCompare(a.modified) || a.noteKey.localeCompare(b.noteKey));
+  }
+  function selectTarget(document, noteKey) {
+    return serial("document:" + identity(document), async () => {
+      const old = read()[identity(document)];
+      const target = { libraryID: document.libraryID, parentKey: document.key, noteKey,
+        sequence: old?.sequence || 1, mode: format.settings().archiveSort };
+      const note = resolve(target);
+      writable(note);
+      // Validate archive boundaries, but never replace or reformat user content.
+      format.recordsIn(parse(note.getNote()));
+      write({ ...read(), [identity(document)]: target });
+      notify();
+      return { ...target };
+    });
+  }
   function notify() { for (const listener of listeners) { try { listener(); } catch (e) { Zotero.logError(e); } } }
   function parse(html) { return new (Zotero.getMainWindow().DOMParser)().parseFromString(html, "text/html"); }
   function resolve(target) {
@@ -48,6 +74,15 @@
       const parent = Zotero.Items.getByLibraryAndKey(document.libraryID, document.key);
       if (!parent || parent.deleted) throw new Error("主文献已不存在，无法创建归档笔记");
       writable(parent);
+      if (!force && !old) {
+        // Synced notes can exist before this device has a local target mapping.
+        const previous = listNotes(document).find(note => note.archive);
+        if (previous) {
+          const target = { libraryID: document.libraryID, parentKey: document.key, noteKey: previous.noteKey,
+            sequence: 1, mode: format.settings().archiveSort };
+          write({ ...read(), [identity(document)]: target }); notify(); return { ...target };
+        }
+      }
       const sequence = (old?.sequence || 0) + 1;
       let name = format.noteName(document, new Date(), sequence);
       const titles = new Set((parent.getNotes?.() || []).map(id => Zotero.Items.get(id)?.getNoteTitle()));
@@ -149,9 +184,18 @@
     }
     return count;
   }
-  Zotero.ZotAgent.archive = { targetFor, save, resolve, parse, flushEditors, reorderCurrent, retry, pending,
+  Zotero.ZotAgent.archive = { targetFor, selectTarget, listNotes, save, resolve, parse, flushEditors, reorderCurrent, retry, pending,
     current: document => document ? read()[identity(document)] || null : null,
-    subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+    subscribe(listener) {
+      listeners.add(listener);
+      if (observerID === null && Zotero.Notifier?.registerObserver) {
+        observerID = Zotero.Notifier.registerObserver({ notify: () => notify() }, ["item"], "zotagent-archive-notes");
+      }
+      return () => {
+        listeners.delete(listener);
+        if (!listeners.size && observerID !== null) { Zotero.Notifier.unregisterObserver(observerID); observerID = null; }
+      };
+    },
     async drain() { while (queues.size || saving.size) await Promise.allSettled([...queues.values(), ...saving]); },
   };
 })();

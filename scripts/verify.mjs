@@ -33,6 +33,8 @@ const scripts = [
   "runtime/src/agent-launch.js",
   "runtime/src/config.js",
   "runtime/src/adapters/opencode.js",
+  "runtime/src/adapters/claude.js",
+  "runtime/src/pty-manager.js",
 ];
 for (const script of scripts) {
   const result = spawnSync(process.execPath, ["--check", path.join(root, script)], {
@@ -49,7 +51,7 @@ for (const script of scripts.filter(name => name.startsWith("plugin/"))) {
   if (!entries.get(script.slice(7))?.equals(source)) throw new Error(`Stale XPI source: ${script}`);
 }
 const runtime = unzip(entries.get("runtime.zip"));
-for (const name of ["src/index.js", "src/normalize.js", "src/agent-launch.js", "src/config.js", "src/adapters/claude.js", "src/adapters/opencode.js"]) {
+for (const name of ["src/index.js", "src/normalize.js", "src/agent-launch.js", "src/config.js", "src/adapters/claude.js", "src/adapters/opencode.js", "src/pty-manager.js"]) {
   if (!runtime.get(name)?.equals(await fs.readFile(path.join(root, "runtime", name)))) throw new Error(`Stale Runtime source: ${name}`);
 }
 for (const arch of ["x64", "arm64"]) {

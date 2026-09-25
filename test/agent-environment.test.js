@@ -38,11 +38,11 @@ test('host profiles restore Windows and WSL settings instead of converting one i
 });
 test('healthy but wrong host or old protocol is not silently reused',async()=>{
   const f=fixture();f.Zotero.isWin=true;const m=f.api.RuntimeManager;
-  m.request=async()=>({ok:true,json:async()=>({platform:'wsl',protocolVersion:3})});
+  m.request=async()=>({ok:true,json:async()=>({platform:'wsl',protocolVersion:4})});
   assert.equal(await m.probe(),'wrong-environment');
   m.request=async()=>({ok:true,json:async()=>({platform:'windows',protocolVersion:2})});
   assert.equal(await m.probe(),'outdated');
-  m.request=async()=>({ok:true,json:async()=>({platform:'windows',protocolVersion:3})});
+  m.request=async()=>({ok:true,json:async()=>({platform:'windows',protocolVersion:4})});
   assert.equal(await m.probe(),'running');
 });
 test('custom endpoint is preserved when environment does not match',async()=>{

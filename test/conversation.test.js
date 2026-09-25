@@ -110,3 +110,23 @@ test('selection clear still removes screenshot and text after archive toolbar re
   assert.equal(dialog.element.querySelector('.zotagent-model-bar'),null);
   assert.ok(dialog.element.querySelector('.zotagent-context-details').contains(dialog.selectionBox));
 });
+
+test('cannot open a competing native writer during an active structured request',async()=>{
+  const f=fixture(),dialog=f.dialog();dialog._requestState='running';let starts=0;dialog.startPty=async()=>starts++;
+  await dialog.togglePtyMode();assert.equal(starts,0);assert.match(dialog.statusElement.textContent,/等待当前回答结束/);
+});
+test('terminal mode blocks hidden structured sends and switches back with controls restored',async()=>{
+  const f=fixture(),dialog=f.dialog();dialog.startPty=async()=>{};
+  await dialog.togglePtyMode();assert.equal(dialog._ptyMode,true);assert.equal(dialog.sendButton.disabled,true);
+  dialog.promptInput.value='do not send';let sends=0;dialog.runtime.run=async()=>sends++;
+  await dialog.send();assert.equal(sends,0);assert.equal(dialog.promptInput.value,'do not send');
+  await dialog.togglePtyMode();assert.equal(dialog._ptyMode,false);assert.equal(dialog.sendButton.disabled,false);
+  assert.equal(dialog.modeToggle.textContent,'打开原生终端');
+});
+test('native session information identifies exact recovery context and the non-interactive picker',()=>{
+  const f=fixture(),dialog=f.dialog();dialog.agent='codex';
+  dialog.showTerminalInfo({nativeSessionID:'test-uuid',platform:'wsl',cwd:'/original/cwd',executable:'/bin/codex',wslDistro:'Ubuntu'});
+  assert.match(dialog.terminalInfoText.textContent,/codex resume test-uuid/);
+  assert.match(dialog.terminalInfoText.textContent,/--include-non-interactive/);
+  assert.match(dialog.terminalInfoText.textContent,/\/original\/cwd/);
+});
