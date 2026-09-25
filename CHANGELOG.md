@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.0 - 2026-09-26
+
+### Features
+
+- Add shared native conversation archive notes, terminal-state records, embedded screenshots, note rotation, naming and ordering settings, and Markdown export.
+- Submit all extracted PDF text for all three agents, with explicit counts and submission state.
+
+### Fixes
+
+- Add per-request frontend cancellation and frozen document/archive ownership; restore historical document bindings and handle failed batches.
+- Send Claude screenshots as structured image input; retain multiple visible text blocks and track temporary-file ownership.
+- Preserve actual push records when regenerating version history.
+
+### Validation and known issues
+
+- Last automated run: 124 passed, 1 skipped (125 total). No new test run performed after the user requested tests stop.
+- Native Zotero 10.0.3 archive smoke test failed its saved-record-count assertion; real editor, image export and sync acceptance remain incomplete.
+- Windows/WSL environment and path mismatch, Windows OpenCode exit code 1, and incomplete PowerShell prompt transmission remain under investigation.
+- This version snapshots the current implementation at the user’s request before addressing those issues. See `docs/RELEASE-0.4.0.md`.
+
 ## 0.3.10 - 2026-09-24
 
 ### Fixes

@@ -32,6 +32,9 @@ async function startup({ rootURI, version }) {
     rootURI + "content/zot-agent.js",
     context,
   );
+  for (const script of ["archive-format.js", "conversation-archive.js", "archive-export.js"]) {
+    Services.scriptloader.loadSubScript(rootURI + "content/" + script, context);
+  }
   Services.scriptloader.loadSubScript(
     rootURI + "content/preferences.js",
     context,

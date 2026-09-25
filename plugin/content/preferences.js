@@ -67,6 +67,29 @@
 
   function load(win) {
     const doc = win.document;
+    const format = Zotero.ZotAgent.archiveFormat;
+    const archiveSettings = doc.querySelector("#zotagent-archive-settings");
+    if (archiveSettings) {
+      archiveSettings.replaceChildren();
+      const make = tag => doc.createElementNS("http://www.w3.org/1999/xhtml", tag);
+      for (const [name, [label, fallback, choices]] of Object.entries(format.choices)) {
+        const title = make("label"); title.textContent = label; title.htmlFor = "zotagent-" + name;
+        const select = make("select"); select.id = title.htmlFor; select.dataset.pref = name;
+        for (const choice of choices) {
+          const [value, text] = Array.isArray(choice) ? choice : [choice, choice || "不显示"];
+          const option = make("option"); option.value = value; option.textContent = text; select.append(option);
+        }
+        if (get(name) === undefined) set(name, fallback);
+        archiveSettings.append(title, select);
+      }
+      const label = make("label"); label.textContent = "自定义前缀"; label.htmlFor = "zotagent-archive-custom-prefix";
+      const input = make("input"); input.id = label.htmlFor; input.dataset.pref = "archiveNameCustomPrefix";
+      archiveSettings.append(label, input);
+    }
+    const preview = () => {
+      const element = doc.querySelector("#zotagent-archive-name-preview");
+      if (element) element.textContent = "名称预览：" + format.noteName({ title: "示例研究文献", shortTitle: "示例文献", author: "张", year: "2026", doi: "10.example/demo", key: "ABCD1234" });
+    };
     Zotero.ZotAgent.runtimeManager.normalizePaths();
     for (const element of doc.querySelectorAll("[data-pref]")) {
       const name = element.dataset.pref;
@@ -87,12 +110,20 @@
 
       element.addEventListener("change", () => {
         set(name, isCheckbox(element) ? element.checked : element.value);
+        if (name === "archiveSort") {
+          const status = doc.querySelector("#zotagent-archive-settings-status");
+          status.textContent = "正在重排当前归档笔记...";
+          Zotero.ZotAgent.archive.reorderCurrent(element.value).then(() => { status.textContent = "排序已更新"; })
+            .catch(error => { status.textContent = "部分笔记未能重排：" + error.message + "。请关闭编辑窗口后重试。"; });
+        }
+        if (name.startsWith("archiveName")) preview();
       });
       if (!isSelect(element) && !isCheckbox(element)) {
-        element.addEventListener("input", () => set(name, element.value));
+        element.addEventListener("input", () => { set(name, element.value); if (name.startsWith("archiveName")) preview(); });
       }
     }
 
+    preview();
     const status = doc.querySelector("#zotagent-runtime-result");
     if (status) status.textContent = "正在连接 Runtime 并检测 Agent...";
     Zotero.ZotAgent.runtimeManager.ensureRunning().then((state) => {

@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const source = readFileSync(new URL('../plugin/content/zot-agent.js', import.meta.url), 'utf8');
 const sandbox = { Zotero: {} };
 vm.runInNewContext(source.replace(
-  'Zotero.ZotAgent = { hooks, controllers, runtimeManager: RuntimeManager };',
+  'Zotero.ZotAgent = { hooks, controllers, runtimeManager: RuntimeManager, utils: { markdownToNoteHTML } };',
   'Zotero.ZotAgent = { MainWindowController };',
 ), sandbox);
 

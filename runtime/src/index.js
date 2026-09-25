@@ -19,7 +19,7 @@ import { createAdapters } from "./adapters/index.js";
 import {
   classifyRawEvent,
   extractSessionID,
-  extractText,
+  createTextExtractor,
   extractModel,
   parseAgentLine,
 } from "./normalize.js";
@@ -104,12 +104,21 @@ function processInvocation(invocation, agent) {
 }
 
 function runAgent(request, response) {
-  if (request.image) {
+  const ownedFiles = new Set();
+  const cleanup = () => {
+    for (const file of ownedFiles) { try { unlinkSync(file); } catch {} }
+    ownedFiles.clear();
+  };
+  if (request.image && request.agent !== "claude-code") {
     const imagePath = saveImageToTemp(request.image);
-    if (imagePath) request.files.push(imagePath);
+    if (!imagePath) throw new Error("Invalid screenshot data");
+    request.files.push(imagePath);
+    ownedFiles.add(imagePath);
   }
   const adapter = adapters[request.agent];
-  const invocation = processInvocation(adapter.buildInvocation(request), request.agent);
+  let invocation;
+  try { invocation = processInvocation(adapter.buildInvocation(request), request.agent); }
+  catch (error) { cleanup(); throw error; }
   if (invocation.nativeSessionID) {
     request.nativeSessionID = invocation.nativeSessionID;
   }
@@ -132,21 +141,36 @@ function runAgent(request, response) {
     });
   }
 
-  const child = spawn(invocation.command, invocation.args, {
+  let child;
+  try { child = spawn(invocation.command, invocation.args, {
     cwd: invocation.cwd,
     env: process.env,
     shell: false,
     windowsVerbatimArguments: invocation.windowsVerbatimArguments === true,
     detached: process.platform !== "win32",
     stdio: ["pipe", "pipe", "pipe"],
-  });
+  }); } catch (error) {
+    cleanup();
+    writeEvent(response, envelope(request, "error", { message: error.message }));
+    writeEvent(response, envelope(request, "request.completed", { code: null, stderr: error.message }));
+    response.end(); return;
+  }
   let stderrTail = "";
+  let inputWritten = false, agentResponded = false, submissionSent = false;
+  const confirmSubmission = () => {
+    if (inputWritten && agentResponded && !submissionSent) {
+      submissionSent = true;
+      writeEvent(response, envelope(request, "input.submitted"));
+    }
+  };
+  const extractVisibleText = createTextExtractor(request.agent);
   running.set(request.requestID, { child, request, response });
 
   const stdout = createInterface({ input: child.stdout });
   stdout.on("line", (line) => {
     if (!line) return;
     const raw = parseAgentLine(line);
+    if (raw && raw.type !== "process.output") { agentResponded = true; confirmSubmission(); }
     const sessionID = extractSessionID(raw);
     if (sessionID && sessionID !== request.nativeSessionID) {
       request.nativeSessionID = sessionID;
@@ -160,7 +184,7 @@ function runAgent(request, response) {
         cwd: request.cwd,
       });
     }
-    const text = extractText(raw);
+    const text = extractVisibleText(raw);
     if (text) {
       writeEvent(response, envelope(request, "message.delta", {
         text,
@@ -191,12 +215,9 @@ function runAgent(request, response) {
   });
 
   child.on("close", (code, signal) => {
+    if (code === 0) { agentResponded = true; confirmSubmission(); }
     running.delete(request.requestID);
-    for (const file of (request.files || [])) {
-      if (file.includes("/zotero-full-agent/tmp/")) {
-        try { unlinkSync(file); } catch {}
-      }
-    }
+    cleanup();
     writeEvent(response, envelope(request, "request.completed", {
       code,
       signal,
@@ -206,12 +227,18 @@ function runAgent(request, response) {
     if (!response.writableEnded) response.end();
   });
 
-  if (invocation.stdin !== null && invocation.stdin !== undefined) {
-    child.stdin.write(invocation.stdin);
-    if (!invocation.keepStdinOpen) child.stdin.end();
-  } else {
-    if (!invocation.keepStdinOpen) child.stdin.end();
-  }
+  // Require both a written input pipe and native events (or successful exit).
+  // A spawned shell alone does not prove the CLI received the input.
+  child.stdin.on("error", (error) => {
+    writeEvent(response, envelope(request, "error", { message: `Agent input failed: ${error.message}` }));
+  });
+  child.on("spawn", () => {
+    const submitted = (error) => {
+      if (!error) { inputWritten = true; confirmSubmission(); }
+    };
+    if (invocation.keepStdinOpen) child.stdin.write(invocation.stdin || "", submitted);
+    else child.stdin.end(invocation.stdin ?? undefined, submitted);
+  });
 
   response.on("close", () => {
     if (running.has(request.requestID)) {
@@ -461,7 +488,8 @@ const server = http.createServer(async (request, response) => {
     }
     writeJSON(response, 404, { error: "not found" });
   } catch (error) {
-    writeJSON(response, 400, { error: error.message });
+    if (response.headersSent) { response.end(); }
+    else writeJSON(response, 400, { error: error.message });
   }
 });
 

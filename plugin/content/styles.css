@@ -987,3 +987,7 @@
   background: #ffffff;
   border-color: var(--za-line-strong);
 }
+
+.zotagent-archive-bar { display: flex; flex-wrap: wrap; gap: 5px; padding: 6px 10px; border-top: 1px solid #d5e1e8; }
+.zotagent-archive-label { flex-basis: 100%; font-size: 11px; overflow-wrap: anywhere; }
+.zotagent-fulltext-status { padding: 0 10px; white-space: pre-wrap; max-height: 80px; overflow-y: auto; font-size: 11px; }

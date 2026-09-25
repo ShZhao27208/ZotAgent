@@ -42,3 +42,15 @@ test("distinguishes approval requests from resolutions", () => {
   assert.equal(classifyRawEvent({ type: "permission.grant" }), "approval.resolved");
   assert.equal(classifyRawEvent({ type: "permission.deny" }), "approval.resolved");
 });
+
+test('Claude preserves all visible blocks and excludes thinking and tool output',()=>{
+  assert.equal(extractText({type:'assistant',message:{content:[{type:'text',text:'first'},{type:'thinking',text:'hidden'},{type:'tool_use',text:'tool'},{type:'text',text:'last'}]}}),'firstlast');
+});
+test('Claude streamed blocks followed by a snapshot are not duplicated',async()=>{
+  const {createTextExtractor}=await import('../runtime/src/normalize.js');const extract=createTextExtractor('claude-code');
+  assert.equal(extract({type:'stream_event',event:{type:'message_start'}}),null);
+  assert.equal(extract({type:'stream_event',event:{type:'content_block_delta',delta:{text:'first'}}}),'first');
+  const final={type:'assistant',message:{id:'m',content:[{type:'text',text:'first'},{type:'text',text:'last'}]}};
+  assert.equal(extract(final),'last');assert.equal(extract(final),null);
+  assert.equal(classifyRawEvent({type:'result',is_error:true}),'error');
+});

@@ -81,3 +81,17 @@ test("no adapter claims approval support", () => {
   assert.equal(adapters.opencode.supportsApproval, false);
   assert.equal(adapters["claude-code"].supportsApproval, false);
 });
+
+test('Claude transports screenshot bytes in a structured user message for fresh and resumed sessions', () => {
+  for (const nativeSessionID of [null, 'session-1']) {
+    const invocation = adapters['claude-code'].buildInvocation({ ...request, nativeSessionID, image: 'data:image/png;base64,aGVsbG8=' });
+    assert.equal(invocation.args[invocation.args.indexOf('--input-format')+1],'stream-json');
+    const input = JSON.parse(invocation.stdin);
+    assert.equal(input.type,'user'); assert.equal(input.message.content[0].text,request.prompt);
+    assert.deepEqual(input.message.content[1],{type:'image',source:{type:'base64',media_type:'image/png',data:'aGVsbG8='}});
+    assert.equal(invocation.keepStdinOpen,false);
+  }
+});
+test('Claude rejects unsupported image types rather than claiming successful attachment',()=>{
+  assert.throws(()=>adapters['claude-code'].buildInvocation({...request,image:'data:image/svg+xml;base64,aGVsbG8='}),/Unsupported image/);
+});

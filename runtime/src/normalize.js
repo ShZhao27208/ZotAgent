@@ -42,8 +42,8 @@ export function extractText(raw) {
   if (!raw || typeof raw !== "object") return null;
   // Claude Code stream-json: {type:"assistant", message:{content:[{text:"..."}]}}
   if (raw.type === "assistant" && raw.message?.content) {
-    const textBlock = raw.message.content.find((b) => b.type === "text" || (typeof b.text === "string" && b.text));
-    if (textBlock?.text) return textBlock.text;
+    const text = raw.message.content.filter((b) => b.type === "text" && typeof b.text === "string").map((b) => b.text).join("");
+    if (text) return text;
   }
   // Claude Code stream-json: {type:"content_block_delta", delta:{text:"..."}}
   if (raw.type === "content_block_delta") {
@@ -67,6 +67,7 @@ export function extractText(raw) {
 }
 
 export function classifyRawEvent(raw) {
+  if (raw?.is_error || raw?.type === "turn.failed") return "error";
   const type = String(raw?.type || "agent.event");
 
   // Approval/permission
@@ -99,6 +100,29 @@ export function classifyRawEvent(raw) {
   if (/^error$|\.error$/i.test(type)) return "error";
 
   return "agent.event";
+}
+
+// Claude may emit streamed text followed by a complete assistant message.
+// Keep all visible blocks while avoiding a second copy of the streamed prefix.
+export function createTextExtractor(agent) {
+  let streamed = "";
+  const completed = new Set();
+  return (raw) => {
+    if (agent !== "claude-code") return extractText(raw);
+    const event = raw?.type === "stream_event" ? raw.event : raw;
+    if (event?.type === "message_start") streamed = "";
+    const text = extractText(raw);
+    if (raw?.type === "assistant") {
+      const id = raw.uuid || (raw.message?.id ? raw.message.id + ":" + JSON.stringify(raw.message.content) : null);
+      if (id && completed.has(id)) return null;
+      if (id) completed.add(id);
+      const remainder = text && streamed && text.startsWith(streamed) ? text.slice(streamed.length) : text;
+      streamed = "";
+      return remainder || null;
+    }
+    if (text && event?.type === "content_block_delta") streamed += text;
+    return text || null;
+  };
 }
 
 export function parseAgentLine(line) {

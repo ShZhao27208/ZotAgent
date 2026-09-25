@@ -349,7 +349,11 @@
     const closeTable = () => {
       if (!inTable) return;
       inTable = false;
-      if (tableRows.length < 2) return;
+      if (tableRows.length < 2 || !tableRows[1].every(cell => /^\s*:?-{3,}:?\s*$/.test(cell))) {
+        for (const row of tableRows) output.push(`<p>${inlineFormat("|" + row.join("|") + "|")}</p>`);
+        tableRows = [];
+        return;
+      }
       const headerCells = tableRows[0];
       const bodyRows = tableRows.slice(2);
       let html = "<table><thead><tr>";
@@ -787,68 +791,72 @@
       }
     }
 
-    async run(payload, onEvent) {
-      await RuntimeManager.ensureRunning();
-      await this.syncAgentPaths();
-      this.currentController = this.makeAbortController();
-      const signal = this.currentController?.signal || undefined;
-      const connectTimeout = setTimeout(() => {
-        if (!this.connected) this.currentController?.abort();
-      }, 10000);
-      this.connected = false;
-      let response;
+    async run(payload, onEvent, operation = {}) {
+      this.operations ||= new Map();
+      const op = operation;
+      op.controller = this.makeAbortController();
+      this.operations.set(payload.requestID, op);
+      const check = () => { if (op.cancelled) { const error = new Error("用户已中断"); error.name = "AbortError"; throw error; } };
+      let timeout;
+      let completion = null, failure = "";
       try {
-        response = await fetch(this.endpoint("/v1/run"), {
-          method: "POST",
-          headers: this.headers(),
-          body: JSON.stringify(payload),
-          signal,
+        check();
+        await RuntimeManager.ensureRunning(); check();
+        await this.syncAgentPaths(); check();
+        const body = JSON.stringify(payload);
+        if (new TextEncoder().encode(body).byteLength > 4 * 1024 * 1024) throw new Error("请求体超过 Runtime 的 4 MiB 接收限制；未主动截断全文或截图，请减少附加文献或图片");
+        timeout = setTimeout(() => { op.timedOut = true; op.controller?.abort(); }, 10000);
+        check();
+        op.sent = true;
+        const response = await fetch(this.endpoint("/v1/run"), {
+          method: "POST", headers: this.headers(), body, signal: op.controller?.signal,
         });
-      } catch (fetchErr) {
-        clearTimeout(connectTimeout);
-        if (fetchErr.name === "AbortError") {
-          throw new Error(`连接超时: 无法连接 ${this.endpoint("/v1/run")} — 请确认 Runtime 已启动且 Endpoint/Token 配置正确`);
+        clearTimeout(timeout); check();
+        if (!response.ok) throw new Error(`Runtime ${response.status}: ${await response.text()}`);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        const accept = line => {
+          if (!line.trim()) return;
+          let event;
+          try { event = JSON.parse(line); } catch { throw new Error("Runtime 返回了无效事件，回答可能不完整"); }
+          if (event.requestID !== payload.requestID || event.windowID !== payload.windowID) return;
+          if (event.type === "error") failure = event.data?.message || event.data?.raw?.error?.message || event.data?.raw?.errors?.join("\n") || "Agent 返回错误";
+          if (event.type === "request.completed") completion = event;
+          check(); onEvent(event);
+        };
+        while (true) {
+          const { value, done } = await reader.read(); check();
+          buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+          const lines = buffer.split("\n"); buffer = lines.pop() || "";
+          for (const line of lines) accept(line);
+          if (done) break;
         }
-        throw new Error(`网络错误: ${fetchErr.message} — Endpoint: ${this.endpoint("")}`);
+        if (buffer.trim()) accept(buffer);
+        if (!completion) { const error = new Error("连接结束但未收到完成事件，回答可能不完整"); error.disconnected = true; throw error; }
+        return { status: completion.data.code === 0 && !failure ? "completed" : "failed", endedAt: completion.timestamp || Date.now(),
+          error: failure || (completion.data.code !== 0 ? `退出码 ${completion.data.code}: ${completion.data.stderr || "Agent 未成功完成"}` : "") };
+      } catch (error) {
+        if (op.cancelled) { const cancelled = new Error("用户已中断"); cancelled.name = "AbortError"; throw cancelled; }
+        if (op.timedOut) throw new Error("连接超时：请确认 Runtime Host 已启动");
+        throw error;
+      } finally {
+        clearTimeout(timeout);
+        if (this.operations.get(payload.requestID) === op) this.operations.delete(payload.requestID);
       }
-      this.connected = true;
-      clearTimeout(connectTimeout);
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(`Runtime ${response.status}: ${detail}`);
-      }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (line.trim()) {
-            try { onEvent(JSON.parse(line)); }
-            catch (error) { Zotero.debug(`[ZotAgent] invalid runtime event: ${error.message}`); }
-          }
-        }
-        if (done) break;
-      }
-      if (buffer.trim()) {
-        try { onEvent(JSON.parse(buffer)); }
-        catch (error) { Zotero.debug(`[ZotAgent] invalid runtime event: ${error.message}`); }
-      }
-      this.currentController = null;
     }
 
     async cancel(requestID) {
-      this.currentController?.abort();
-      this.currentController = null;
+      const op = this.operations?.get(requestID);
+      if (op) { op.cancelled = true; op.controller?.abort(); }
+      if (!op?.sent) return;
+      const controller = this.makeAbortController();
+      const timeout = setTimeout(() => controller?.abort(), 3000);
       try {
-        await fetch(this.endpoint(`/v1/requests/${requestID}/cancel`), {
-          method: "POST",
-          headers: this.headers(),
+        await fetch(this.endpoint(`/v1/requests/${encodeURIComponent(requestID)}/cancel`), {
+          method: "POST", headers: this.headers(), signal: controller?.signal,
         });
-      } catch (_) {}
+      } catch (_) {} finally { clearTimeout(timeout); }
     }
 
     async approve(requestID, approved) {
@@ -883,6 +891,7 @@
       this.runtime = new RuntimeClient(this);
       this.element = this.build();
       this.controller.layer.appendChild(this.element);
+      this._archiveUnsubscribe = Zotero.ZotAgent.archive?.subscribe(() => this.updateArchiveBar());
       this.updateContext();
     }
 
@@ -949,6 +958,7 @@
       const clearSelection = createElement(this.doc, "button", "zotagent-small-button", "清除");
       clearSelection.addEventListener("click", () => {
         this.selectionInput.value = "";
+        this.selectionSnapshot = null;
         this.selectionLabel.textContent = "PDF 选区";
         this.capturedImage = null;
         this.capturePreview.style.display = "none";
@@ -978,6 +988,19 @@
       this.multiModeSelect.addEventListener("change", () => { this._multiMode = this.multiModeSelect.value; });
       this._multiMode = "combined";
       this.refBar.append(this.fullTextCheckbox, fullTextLabel, importBtn, this.multiModeSelect);
+
+      this.archiveBar = createElement(this.doc, "div", "zotagent-archive-bar");
+      this.archiveLabel = createElement(this.doc, "span", "zotagent-archive-label", "本次不会自动归档");
+      const openArchive = createElement(this.doc, "button", "zotagent-small-button", "打开记忆笔记");
+      openArchive.addEventListener("click", () => this.archiveAction("open"));
+      const newArchive = createElement(this.doc, "button", "zotagent-small-button", "新建记忆笔记");
+      newArchive.addEventListener("click", () => this.archiveAction("new"));
+      const exportArchive = createElement(this.doc, "button", "zotagent-small-button", "导出 Markdown");
+      exportArchive.addEventListener("click", () => this.archiveAction("export"));
+      this.archiveRetry = createElement(this.doc, "button", "zotagent-small-button", "重试归档");
+      this.archiveRetry.addEventListener("click", () => this.archiveAction("retry"));
+      this.archiveBar.append(this.archiveLabel, openArchive, newArchive, exportArchive, this.archiveRetry);
+      this.fullTextStatus = createElement(this.doc, "div", "zotagent-fulltext-status");
 
       this.messagesElement = createElement(this.doc, "div", "zotagent-messages");
       this.statusElement = createElement(this.doc, "div", "zotagent-status", "就绪");
@@ -1030,6 +1053,8 @@
         this.selectionBox,
         this.refBar,
         this.extraItemsList,
+        this.archiveBar,
+        this.fullTextStatus,
         this.messagesElement,
         this.ptyContainer,
         this.statusElement,
@@ -1058,26 +1083,65 @@
       });
     }
 
-    updateContext() {
-      if (this.primaryContext) return;
-      const active = this.controller.getActiveContext();
+    updateContext(item) {
+      if (item === undefined && (this.primaryContext || this._contextDetached)) return;
+      let active;
+      if (item !== undefined) {
+        this.primaryContext = null;
+        this._contextDetached = !item;
+        this.extraItems = [];
+        this.selectionInput.value = "";
+        this.selectionSnapshot = null;
+        this.selectionLabel.textContent = "PDF 选区";
+        this.selectionSnapshot = null; this.captureTarget = null; this.captureAttachmentID = null;
+        this.capturedImage = null; this.capturePreview.style.display = "none";
+        const attachmentID = item?.getAttachments?.()[0];
+        active = item ? { topItem: item, title: item.getField("title"), attachment: attachmentID ? Zotero.Items.get(attachmentID) : null } : null;
+      } else active = this.controller.getActiveContext();
       this.context = active ? (this.primaryContext = active.items?.[0]
         ? { ...active, ...active.items[0], items: [active.items[0]] }
         : { ...active, items: [active] }) : null;
+      this.contextBar.innerHTML = "";
       if (!this.context) {
         this.contextBar.textContent = "未绑定文献";
         this.contextBar.title = "";
-        this._multiMode = null;
+        this.updateArchiveBar();
         return;
       }
-      this.contextBar.innerHTML = "";
-      this.contextBar.append(
-        createElement(this.doc, "span", "zotagent-primary-label", "主文献: "),
-        createElement(this.doc, "strong", "", this.context.title || "未命名文献"),
-      );
+      this.contextBar.append(createElement(this.doc, "span", "zotagent-primary-label", "主文献: "),
+        createElement(this.doc, "strong", "", this.context.title || "未命名文献"));
       this.contextBar.title = this.context.attachmentPath || this.context.title || "";
       this.multiModeSelect.style.display = "inline-block";
       this.renderExtraItems();
+      this.updateArchiveBar("正在准备记忆笔记...");
+      const document = Zotero.ZotAgent.archiveFormat?.documentSnapshot(this.context.topItem);
+      Zotero.ZotAgent.archive?.targetFor(document).then(() => this.updateArchiveBar()).catch(error => this.updateArchiveBar("归档笔记创建失败：" + error.message));
+    }
+
+    updateArchiveBar(message = "") {
+      if (this._destroyed || !this.archiveLabel) return;
+      const document = Zotero.ZotAgent.archiveFormat?.documentSnapshot(this.context?.topItem);
+      if (!document) { this.archiveLabel.textContent = "本次不会自动归档：未绑定主文献"; this.archiveRetry.hidden = true; return; }
+      const archive = Zotero.ZotAgent.archive;
+      const target = archive?.current(document);
+      let title = "准备中";
+      if (target) { try { title = archive.resolve(target).getNoteTitle(); } catch { title = "原笔记不可用，请新建"; } }
+      const failed = [...(archive?.pending.values() || [])].filter(e => e.record.primaryDocument.key === document.key && e.record.primaryDocument.libraryID === document.libraryID).length;
+      this.archiveRetry.hidden = !failed;
+      this.archiveLabel.textContent = `记忆笔记：${title}${message ? " · " + message : failed ? ` · ${failed} 条待归档，可重试` : ""}`;
+    }
+
+    async archiveAction(action) {
+      const document = Zotero.ZotAgent.archiveFormat.documentSnapshot(this.context?.topItem);
+      if (!document) { this.updateArchiveBar(); return; }
+      try {
+        const archive = Zotero.ZotAgent.archive;
+        if (action === "retry") { await archive.retry(document); this.updateArchiveBar("重试完成"); return; }
+        const target = await archive.targetFor(document, action === "new");
+        if (action === "open") await Zotero.Notes.open(archive.resolve(target).id);
+        if (action === "export" && await Zotero.ZotAgent.archiveExport.exportNote(target, this.win)) this.renderStatus("Markdown 和图片已导出");
+        this.updateArchiveBar();
+      } catch (error) { this.updateArchiveBar(error.message); }
     }
 
     importSelectedItems() {
@@ -1136,6 +1200,7 @@
     receiveSelection(snapshot) {
       if (!this.receiveSelections) return;
       if (this._capturingImage) return;
+      this.selectionSnapshot = snapshot;
       this.captureTarget = snapshot.annotation || null;
       this.captureAttachmentID = snapshot.attachmentID || null;
       const mode = String(pref("selectionMode", "replace"));
@@ -1559,53 +1624,8 @@
       this.element.appendChild(panel);
     }
 
-    buildPrompt(question) {
-      const blocks = [];
-      const allItems = this.context ? [{ title: this.context.title, topItem: this.context.topItem }] : [];
-      for (const entry of this.extraItems) {
-        allItems.push({ title: entry.title, topItem: entry.topItem });
-      }
-      if (allItems.length) {
-        const descriptions = allItems.map((item, index) => {
-          const parts = [`[S${index + 1}] ${item.title || "未命名文献"}`];
-          const topItem = item.topItem;
-          if (topItem) {
-            const doi = topItem.getField?.("DOI");
-            const year = topItem.getField?.("year") || topItem.getField?.("date")?.slice(0, 4);
-            const creators = topItem.getCreators?.()?.map((c) => c.lastName || c.name).slice(0, 3);
-            if (creators?.length) parts.push(`Authors: ${creators.join(", ")}`);
-            if (year) parts.push(`Year: ${year}`);
-            if (doi) parts.push(`DOI: ${doi}`);
-          }
-          return parts.join(" | ");
-        });
-        blocks.push("## Zotero 文献上下文\n" + descriptions.join("\n"));
-      }
-      if (this.pdfText) {
-        const label = this.context?.title || "当前文献";
-        blocks.push(`## PDF 全文: ${label}\n` + this.pdfText);
-      }
-      for (const extra of this.extraPdfTexts || []) {
-        blocks.push(`## PDF 全文: ${extra.title}\n` + extra.text);
-      }
-      if (this.capturedImage) {
-        const canPassImage = this._agentCapabilities?.[this.agent]?.supportsImages;
-        blocks.push(canPassImage
-          ? "## PDF 截图\n[已附加 PDF 区域截图作为图像上下文]"
-          : "## PDF 截图\n[注意: 当前 Agent 不支持图像输入，截图未传递]");
-      }
-      if (this.selectionInput.value.trim()) {
-        const pageInfo = this.selectionLabel.textContent !== "PDF 选区"
-          ? ` (${this.selectionLabel.textContent.replace("PDF 选区 - ", "")})`
-          : "";
-        blocks.push("## 用户选择并确认的 PDF 文本" + pageInfo + "\n" + this.selectionInput.value.trim());
-      }
-      blocks.push("## 用户问题\n" + question.trim());
-      return blocks.join("\n\n");
-    }
-
     addMessage(role, text) {
-      const item = { role, text };
+      const item = { role, text, agent: this.agent };
       this.messages.push(item);
       const element = createElement(this.doc, "div", `zotagent-message is-${role}`);
       element.textContent = text;
@@ -1688,272 +1708,200 @@
     async send() {
       const question = this.promptInput.value.trim();
       if (!question || this._requestState !== "idle") return;
-      this._requestState = "preparing";
-      this.requestID = `${this.id}-${Date.now()}`;
-      const requestSnapshot = {
-        agent: this.agent,
-        cwd: this.cwdInput.value.trim() || pref("defaultWorkingDirectory", ""),
-        windowID: this.id,
-      };
-      this.sendButton.disabled = true;
-      this.stopButton.disabled = false;
       this.updateContext();
-
-      this.pdfText = "";
-      this.extraPdfTexts = [];
-      const wantFullText = this.fullTextCheckbox.checked;
-      const attachment = this.context?.attachment;
-      if (wantFullText && attachment) {
-        this.renderStatus("正在从 Zotero 提取 PDF 全文...");
-        const extracted = await extractPdfText(attachment);
-        if (extracted.text) {
-          const maxChars = 60000;
-          this.pdfText = extracted.text.length > maxChars
-            ? `${extracted.text.slice(0, maxChars)}\n\n[全文超过当前上下文上限，已截断；请使用定向问题继续读取。]`
-            : extracted.text;
-        } else {
-          this.renderStatus("Zotero 未提取到 PDF 文本，将仅使用选区/截图", true);
-        }
-      }
-
-      for (const entry of this.extraItems) {
-        if (!entry.includeFullText || !entry.attachment) continue;
-        const extracted = await extractPdfText(entry.attachment);
-        if (extracted.text) {
-          const maxChars = 60000;
-          const text = extracted.text.length > maxChars
-            ? `${extracted.text.slice(0, maxChars)}\n\n[已截断]`
-            : extracted.text;
-          this.extraPdfTexts.push({ title: entry.title, text });
-        }
-      }
-
-      if (this._requestState !== "preparing") return;
-
-      if (this._multiMode === "separate" && [this.context, ...this.extraItems].filter(Boolean).length > 1) {
-        await this.sendSeparate(question);
-        return;
-      }
-
-      this.addMessage("user", question);
-      const assistant = this.addMessage("assistant", "");
-      this.promptInput.value = "";
-      this.renderStatus("Agent 运行中...");
-
-      if (!requestSnapshot.cwd) {
-        this.renderStatus("请先设置工作目录 (defaultWorkingDirectory)");
-        this.sendButton.disabled = false;
-        this.stopButton.disabled = true;
-        this._requestState = "idle";
-        this.requestID = null;
-        return;
-      }
-
-      const payload = {
-        windowID: requestSnapshot.windowID,
-        requestID: this.requestID,
-        agent: requestSnapshot.agent,
-        nativeSessionID: this.sessions[requestSnapshot.agent] || null,
-        cwd: requestSnapshot.cwd,
-        model: this.selectedModel(),
-        prompt: this.buildPrompt(question),
-        files: [],
-        image: this.capturedImage || null,
+      const format = Zotero.ZotAgent.archiveFormat;
+      const primaryDocument = format.documentSnapshot(this.context?.topItem);
+      const contexts = [this.context && { ...this.context, includeFullText: this.fullTextCheckbox.checked }, ...this.extraItems.map(item => ({ ...item }))].filter(Boolean);
+      const batch = {
+        id: `${this.id}-${Date.now()}-${++dialogSequence}`, submittedAt: Date.now(),
+        agent: this.agent, model: this.selectedModel(), question,
+        cwd: this.cwdInput.value.trim() || pref("defaultWorkingDirectory", ""),
+        primaryDocument, references: this.extraItems.map(item => format.documentSnapshot(item.topItem)), contexts,
+        selection: this.selectionInput.value.trim(), selectionLabel: this.selectionLabel.textContent,
+        selectionDocument: this.selectionSnapshot?.document || null,
+        image: this.capturedImage || null, separate: this._multiMode === "separate" && contexts.length > 1,
+        nativeSessionID: this.sessions[this.agent] || null, cancelled: false,
+        archiveTarget: primaryDocument ? Zotero.ZotAgent.archive.targetFor(primaryDocument) : Promise.resolve(null),
       };
-
+      batch.archiveTarget.catch(() => {});
+      this._activeBatch = batch;
+      this._requestState = "preparing";
+      this.sendButton.disabled = true; this.stopButton.disabled = false;
+      this.promptInput.value = "";
+      this.addMessage("user", batch.separate ? `[分别处理 ${contexts.length} 篇] ${question}` : question);
       try {
-        this._requestState = "running";
-        let requestSucceeded = false;
-        await this.runtime.run(payload, (event) => {
-          if (event.windowID !== this.id || event.requestID !== this.requestID) return;
-          if (event.type === "session.updated" && event.nativeSessionID) {
-            this.sessions[requestSnapshot.agent] = event.nativeSessionID;
-            SessionHistory.upsert({
-              agent: requestSnapshot.agent,
-              nativeSessionID: event.nativeSessionID,
-              windowID: requestSnapshot.windowID,
-              cwd: requestSnapshot.cwd,
-              title: this.contextBar.textContent || "未命名会话",
-              documentKey: this.context?.topItem?.key || null,
-              documentLibraryID: this.context?.topItem?.libraryID ?? null,
-            });
-          }
-          if (event.type === "message.delta" && event.data?.text) {
-            assistant.item.text += event.data.text;
-            assistant.element.textContent = assistant.item.text;
-            this.messagesElement.scrollTop = this.messagesElement.scrollHeight;
-          }
-          if (event.type === "model.updated" && event.data?.model) {
-            this.updateModelLabel(event.data.model);
-          }
-          if (event.type === "tool.started") this.renderStatus("Agent 正在调用工具...");
-          if (event.type === "tool.completed") this.renderStatus("工具调用完成");
-          if (event.type === "command.started") this.renderStatus("Agent 正在执行命令...");
-          if (event.type === "command.output") this.renderStatus("命令输出中...");
-          if (event.type === "file.diff") this.renderStatus("文件变更...");
-          if (event.type === "artifact.created") this.renderStatus("已创建文件");
-          if (event.type === "usage.updated" && event.data?.raw) {
-            const u = event.data.raw;
-            const tokens = u.input_tokens || u.tokens_used || u.usage?.total_tokens;
-            if (tokens) this.renderStatus(`已用 ${tokens} tokens`);
-          }
-          if (event.type === "approval.requested") {
-            if (this._agentCapabilities?.[this.agent]?.supportsApproval) {
-              this.showApprovalUI(event);
-            } else {
-              this.renderStatus("Agent 请求审批，请在原生终端中处理", true);
-            }
-          }
-          if (event.type === "process.stderr") {
-            const line = event.data?.line || "";
-            this.lastProcessError = `${this.lastProcessError || ""}${line}\n`.slice(-4000);
-            if (/error|fatal|panic|exception/i.test(line)) this.renderStatus(line, true);
-          }
-          if (event.type === "error") this.renderStatus(event.data.message, true);
-          if (event.type === "request.completed") {
-            requestSucceeded = event.data.code === 0;
-            const failed = !requestSucceeded;
-            const detail = event.data.stderr || this.lastProcessError;
-            this.renderStatus(failed && detail ? `退出码 ${event.data.code}: ${detail.trim().split(/\r?\n/).at(-1)}` : (failed ? `退出码 ${event.data.code}` : "完成"), failed);
-          }
-        });
-        const answer = requestSucceeded ? assistant.item.text : "";
-        if (answer && pref("autoInsertAtCursor", false)) {
-          const inserted = NoteService.insertAtActiveCursor(answer);
-          if (!inserted) this.renderStatus(NoteService.lastInsertError, true);
-        }
-        if (answer && pref("autoSaveNotes", false) && this.context?.topItem) {
-          await NoteService.createChildNote(this.context, answer);
-          this.renderStatus("完成并已自动保存子笔记");
-        }
-        if (this.sessions[requestSnapshot.agent]) {
-          SessionHistory.updateMessages(
-            requestSnapshot.agent,
-            this.sessions[requestSnapshot.agent],
-            this.messages.map((m) => ({ role: m.role, text: m.text })),
-          );
-        }
-      } catch (error) {
-        if (error.name === "AbortError") {
-          this.renderStatus("连接超时：请确认 Runtime Host 已启动", true);
-        } else {
-          this.renderStatus(error.message, true);
-        }
+        if (batch.separate) await this.sendSeparate(batch);
+        else await this.executeQuestion(batch, contexts);
       } finally {
-        this.requestID = null;
-        this._requestState = "idle";
-        this.sendButton.disabled = false;
-        this.stopButton.disabled = true;
+        if (this._activeBatch === batch) {
+          this._activeBatch = null; this.requestID = null; this._requestState = "idle";
+          this.sendButton.disabled = false; this.stopButton.disabled = true;
+        }
       }
     }
 
-    async sendSeparate(question) {
-      const items = [this.context, ...this.extraItems].filter(Boolean);
-      this.addMessage("user", `[分别处理 ${items.length} 篇] ${question}`);
-      this.promptInput.value = "";
-      this.sendButton.disabled = true;
-      this.stopButton.disabled = false;
-      this._batchCancelled = false;
-      let succeeded = 0;
-      let failed = 0;
-
-      try { this._requestState = "running";
-      for (let i = 0; i < items.length; i++) {
-        if (this._batchCancelled) break;
-        const item = items[i];
-        const isPrimary = i === 0 && item === this.context;
-        const useFullText = isPrimary ? this.fullTextCheckbox.checked : !!item.includeFullText;
-        const title = item.title || `文献 ${i + 1}`;
-        this.renderStatus(`分别处理 (${i + 1}/${items.length}): ${title}`);
-        const assistant = this.addMessage("assistant", "");
-        this.requestID = `${this.id}-${Date.now()}-${i}`;
-
-        const singleContext = {
-          title: item.title,
-          topItem: item.topItem,
-          attachmentPath: item.topItem?.getAttachments?.()[0]
-            ? Zotero.Items.get(item.topItem.getAttachments()[0])?.getFilePath?.() || ""
-            : "",
-        };
-        singleContext.wslPath = windowsToWSLPath(singleContext.attachmentPath);
-
-        let fullTextBlock = "";
-        if (useFullText) {
-          const att = item.topItem?.getAttachments?.()[0]
-            ? Zotero.Items.get(item.topItem.getAttachments()[0]) : null;
-          if (att) {
-            const extracted = await extractPdfText(att);
-            if (extracted.text) {
-              const maxChars = 60000;
-              const text = extracted.text.length > maxChars
-                ? `${extracted.text.slice(0, maxChars)}\n\n[已截断]` : extracted.text;
-              fullTextBlock = `\n\n## PDF 全文: ${title}\n${text}`;
-            }
-          }
-        }
-
-        const prompt = `## Zotero 当前文献\n${title}${fullTextBlock}\n\n## 用户问题\n${question}`;
-        const payload = {
-          windowID: this.id,
-          requestID: this.requestID,
-          agent: this.agent,
-          nativeSessionID: null,
-          cwd: this.cwdInput.value.trim() || pref("defaultWorkingDirectory", ""),
-          model: this.selectedModel(),
-          prompt,
-          files: [],
-          image: null,
-        };
-
-        try {
-          await this.runtime.run(payload, (event) => {
-            if (event.requestID !== this.requestID) return;
-            if (event.type === "message.delta" && event.data?.text) {
-              assistant.item.text += event.data.text;
-              assistant.element.textContent = assistant.item.text;
-              this.messagesElement.scrollTop = this.messagesElement.scrollHeight;
-            }
-            if (event.type === "error") this.renderStatus(event.data.message, true);
-          });
-          succeeded++;
-          if (assistant.item.text && pref("autoSaveNotes", false)) {
-            await NoteService.createChildNote(singleContext, assistant.item.text);
-          }
-        } catch (error) {
-          failed++;
-          this.addMessage("assistant", `[${title}] 失败: ${error.message}`);
-        }
-      } } finally {
-      this.requestID = null;
-      this._requestState = "idle";
-      this._batchCancelled = false;
-      this.sendButton.disabled = false;
-      this.stopButton.disabled = true;
-      const cancelled = items.length - succeeded - failed;
-      this.renderStatus(
-        cancelled > 0
-          ? `分别处理中断: ${succeeded} 成功, ${failed} 失败, ${cancelled} 取消`
-          : `分别处理完成: ${succeeded} 成功, ${failed} 失败`,
-        failed > 0,
-      );
+    async sendSeparate(batch) {
+      let succeeded = 0, failed = 0;
+      for (let index = 0; index < batch.contexts.length; index++) {
+        if (batch.cancelled) break;
+        const context = batch.contexts[index];
+        const record = await this.executeQuestion(batch, [context], index);
+        if (record.status === "completed") succeeded++;
+        else if (record.status !== "cancelled") failed++;
       }
+      if (this._activeBatch === batch) {
+        const cancelled = batch.contexts.length - succeeded - failed;
+        this.renderStatus(`分别处理${cancelled ? "中断" : "完成"}: ${succeeded} 成功, ${failed} 失败${cancelled ? `, ${cancelled} 取消` : ""}`, failed > 0);
+      }
+    }
+
+    async executeQuestion(batch, contexts, index = 0) {
+      const format = Zotero.ZotAgent.archiveFormat;
+      const request = {
+        id: `${batch.id}-${index}`, submittedAt: batch.submittedAt, startedAt: Date.now(),
+        windowID: this.id, agent: batch.agent, model: null, question: batch.question,
+        primaryDocument: batch.primaryDocument, references: batch.references,
+        targetDocument: batch.separate ? format.documentSnapshot(contexts[0]?.topItem) : null,
+        selection: batch.separate ? "" : batch.selection, selectionLabel: batch.selectionLabel,
+        selectionDocument: batch.selectionDocument,
+        imageSnapshots: !batch.separate && batch.image ? [batch.image] : [],
+        answer: "", status: "preparing", fullTextAttachments: [], operation: {}, finalized: false,
+      };
+      batch.request = request;
+      this.requestID = request.id;
+      const assistant = this.addMessage("assistant", "");
+      assistant.item.agent = batch.agent;
+      const visible = () => this._activeBatch === batch && !request.finalized;
+      const check = () => { if (batch.cancelled || request.finalized) { const error = new Error("用户已中断"); error.name = "AbortError"; throw error; } };
+      try {
+        check();
+        const fullTexts = [];
+        for (const entry of contexts) {
+          if (!entry.includeFullText) continue;
+          const info = { title: entry.title || "未命名文献", documentKey: entry.topItem?.key, extractedChars: 0, state: "extracting" };
+          request.fullTextAttachments.push(info);
+          if (visible()) this.renderStatus("正在从 Zotero 提取 PDF 全文...");
+          // Preserve the existing separately-processed attachment lookup. The
+          // general library-view attachment selection remains outside scope.
+          const attachment = entry.attachment || (batch.separate && entry.topItem?.getAttachments?.()[0] ? Zotero.Items.get(entry.topItem.getAttachments()[0]) : null);
+          const extracted = attachment ? await extractPdfText(attachment) : { text: "" };
+          check();
+          info.extractedChars = Array.from(extracted.text).length;
+          info.state = "prepared";
+          if (extracted.text) fullTexts.push({ title: info.title, text: extracted.text });
+        }
+        check();
+        if (this.fullTextStatus) this.fullTextStatus.textContent = request.fullTextAttachments.map(e => `${e.title}：${format.fullTextDescription(e)}`).join("\n");
+        const prompt = this.buildRequestPrompt(batch, request, contexts, fullTexts);
+        const payload = { windowID: this.id, requestID: request.id, agent: batch.agent,
+          nativeSessionID: batch.separate ? null : batch.nativeSessionID, cwd: batch.cwd,
+          model: batch.model, prompt, files: [], image: request.imageSnapshots[0] || null };
+        request.status = "running";
+        if (visible()) { this._requestState = "running"; this.renderStatus("Agent 运行中..."); }
+        const result = await this.runtime.run(payload, event => {
+          if (!visible() || batch.cancelled || event.requestID !== request.id) return;
+          if (event.type === "request.started") {
+            for (const entry of request.fullTextAttachments) if (entry.extractedChars) entry.state = "received";
+          }
+          if (event.type === "input.submitted") {
+            for (const entry of request.fullTextAttachments) if (entry.extractedChars) entry.state = "submitted";
+            if (this.fullTextStatus) this.fullTextStatus.textContent = request.fullTextAttachments.map(e => `${e.title}：${format.fullTextDescription(e)}`).join("\n");
+          }
+          if (event.type === "session.updated" && event.nativeSessionID) {
+            request.nativeSessionID = event.nativeSessionID;
+            if (!batch.separate) {
+              this.sessions[batch.agent] = event.nativeSessionID;
+              SessionHistory.upsert({ agent: batch.agent, nativeSessionID: event.nativeSessionID, windowID: this.id, cwd: batch.cwd,
+                title: batch.primaryDocument?.title || "普通聊天", documentKey: batch.primaryDocument?.key || null,
+                documentLibraryID: batch.primaryDocument?.libraryID ?? null,
+                references: batch.references.map(d => ({ libraryID: d.libraryID, key: d.key })),
+              });
+            }
+          }
+          if (event.type === "message.delta" && event.data?.text) {
+            request.answer += event.data.text;
+            assistant.item.text = request.answer;
+            assistant.element.textContent = request.answer;
+            this.messagesElement.scrollTop = this.messagesElement.scrollHeight;
+          }
+          if (event.type === "model.updated" && event.data?.model) { request.model = event.data.model; this.updateModelLabel(event.data.model); }
+          const messages = { "tool.started": "Agent 正在调用工具...", "tool.completed": "工具调用完成", "command.started": "Agent 正在执行命令...", "command.output": "命令输出中...", "file.diff": "文件变更...", "artifact.created": "已创建文件" };
+          if (messages[event.type]) this.renderStatus(messages[event.type]);
+          if (event.type === "approval.requested") this.renderStatus("结构化请求无法回传审批，请停止后在原生终端另行执行", true);
+          if (event.type === "error") this.renderStatus(event.data?.message || "Agent 返回错误", true);
+          if (event.type === "request.completed" && event.data.code !== 0) request.failureSummary = `退出码 ${event.data.code}: ${event.data.stderr || "Agent 未成功完成"}`;
+        }, request.operation);
+        check();
+        request.status = result.status;
+        request.endedAt = result.endedAt;
+        request.failureSummary = result.error || request.failureSummary;
+      } catch (error) {
+        if (!request.finalized) {
+          request.status = batch.cancelled || error.name === "AbortError" ? "cancelled" : error.disconnected ? "disconnected" : "failed";
+          request.endedAt = Date.now(); request.failureSummary = error.message;
+          if (request.operation.sent) for (const entry of request.fullTextAttachments) if (entry.state === "prepared" && entry.extractedChars) entry.state = "sending";
+        }
+      } finally {
+        this.finalizeRequest(batch, request);
+      }
+      if (this._activeBatch === batch && !batch.cancelled) {
+        this.renderStatus(request.status === "completed" ? "完成" : request.failureSummary || format.labels[request.status], request.status !== "completed");
+        if (request.status === "completed" && request.answer) {
+          try {
+            if (pref("autoInsertAtCursor", false) && !NoteService.insertAtActiveCursor(request.answer)) this.renderStatus(NoteService.lastInsertError, true);
+            if (pref("autoSaveNotes", false) && contexts[0]?.topItem) await NoteService.createChildNote(contexts[0], request.answer);
+          } catch (error) { this.renderStatus(`回答完成，单独保存/插入失败：${error.message}`, true); }
+        }
+        const session = this.sessions[batch.agent];
+        if (!batch.separate && session) SessionHistory.updateMessages(batch.agent, session, this.messages.filter(m => !m.agent || m.agent === batch.agent).map(m => ({ role: m.role, text: m.text, agent: batch.agent })));
+      }
+      return request;
+    }
+
+    buildRequestPrompt(batch, request, contexts, fullTexts) {
+      const format = Zotero.ZotAgent.archiveFormat;
+      const documents = contexts.map(c => format.documentSnapshot(c.topItem)).filter(Boolean);
+      const blocks = [];
+      if (documents.length) blocks.push("## Zotero 文献上下文\n" + documents.map((d, i) => `[S${i + 1}] ${d.title} | ${d.authors} | ${d.year}${d.doi ? ` | DOI: ${d.doi}` : ""}`).join("\n"));
+      for (const entry of fullTexts) blocks.push(`## PDF 全文: ${entry.title}\n${entry.text}`);
+      if (request.imageSnapshots.length) blocks.push("## PDF 截图\n已附加 PDF 区域截图作为图像输入。");
+      if (request.selection) blocks.push(`## 用户选择并确认的 PDF 文本 (${request.selectionLabel})${request.selectionDocument ? `\n来源：${request.selectionDocument.title}` : ""}\n${request.selection}`);
+      blocks.push("## 用户问题\n" + batch.question);
+      return blocks.join("\n\n");
+    }
+
+    finalizeRequest(batch, request) {
+      if (request.finalized) return request.archiveTask;
+      request.finalized = true;
+      request.endedAt ||= Date.now();
+      if (!request.primaryDocument) { this.updateArchiveBar(); return; }
+      const { operation, finalized, archiveTask, ...data } = request;
+      const record = JSON.parse(JSON.stringify(data));
+      request.archiveTask = Zotero.ZotAgent.archive.save(record, batch.archiveTarget).then(() => {
+        if (!this._destroyed) this.updateArchiveBar("历史已归档");
+      }).catch(error => {
+        if (!this._destroyed) this.updateArchiveBar("归档失败，可重试：" + error.message);
+        Zotero.logError(error);
+      });
+      return request.archiveTask;
     }
 
     async stop() {
-      if (this._requestState === "idle") return;
-      this._batchCancelled = true;
-      if (this._requestState === "preparing") {
-        this._requestState = "idle";
-        this.requestID = null;
-        this.sendButton.disabled = false;
-        this.stopButton.disabled = true;
-        this.renderStatus("已取消");
-        return;
+      const batch = this._activeBatch;
+      if (!batch || batch.cancelled) return;
+      batch.cancelled = true;
+      const request = batch.request;
+      if (request && !request.finalized) {
+        request.status = "cancelled";
+        request.endedAt = Date.now();
+        request.failureSummary = "用户中断";
+        request.operation.cancelled = true;
+        this.finalizeRequest(batch, request);
+        void this.runtime.cancel(request.id);
       }
-      if (!this.requestID) return;
-      const requestID = this.requestID;
-      this.renderStatus("正在停止...");
-      await this.runtime.cancel(requestID);
+      this._activeBatch = null; this.requestID = null; this._requestState = "idle";
+      this.sendButton.disabled = false; this.stopButton.disabled = true;
+      this.renderStatus("已中断，已保留收到的回答");
     }
 
     lastAnswer() {
@@ -2053,6 +2001,7 @@
     }
 
     restoreSession(entry) {
+      if (this._requestState !== "idle") { this.renderStatus("请先停止当前任务再恢复历史会话", true); return; }
       this.agent = entry.agent;
       this.sessions[entry.agent] = entry.nativeSessionID;
       if (entry.cwd) this.cwdInput.value = entry.cwd;
@@ -2064,14 +2013,26 @@
       if (entry.documentKey && entry.documentLibraryID != null) {
         try {
           const item = Zotero.Items.getByLibraryAndKey(entry.documentLibraryID, entry.documentKey);
-          if (item) {
+          if (item && !item.deleted) {
             this.updateContext(item);
           } else {
-            this.renderStatus("原始文献已不存在，仅恢复消息", true);
+            this.updateContext(null);
+            this.renderStatus("原始文献已不存在，本次不会自动归档", true);
           }
         } catch {
-          this.renderStatus("无法恢复文献上下文", true);
+          this.updateContext(null);
+          this.renderStatus("无法恢复文献上下文，本次不会自动归档", true);
         }
+      }
+      if (!entry.documentKey || entry.documentLibraryID == null) this.updateContext(null);
+      if (this.context) {
+        for (const reference of entry.references || []) {
+          const item = Zotero.Items.getByLibraryAndKey(reference.libraryID, reference.key);
+          if (!item || item.deleted || item.id === this.context.topItem.id) continue;
+          const attachmentID = item.getAttachments?.()[0];
+          this.extraItems.push({ topItem: item, title: item.getField("title"), attachment: attachmentID ? Zotero.Items.get(attachmentID) : null, includeFullText: false });
+        }
+        this.renderExtraItems();
       }
       if (entry.messages?.length) {
         for (const msg of entry.messages) {
@@ -2260,7 +2221,9 @@
     }
 
     destroy() {
-      if (this.requestID) this.runtime.cancel(this.requestID);
+      this.stop();
+      this._destroyed = true;
+      this._archiveUnsubscribe?.();
       this._captureCleanup?.();
       if (this._ptyID) this.closePty();
       this.element.remove();
@@ -2467,6 +2430,7 @@
         pageIndex,
         attachmentID: reader?._item?.id || reader?.itemID || null,
         annotation,
+        document: Zotero.ZotAgent.archiveFormat?.documentSnapshot(reader?._item?.parentItemID ? Zotero.Items.get(reader._item.parentItemID) : reader?._item),
       };
       for (const dialog of this.dialogs.values()) dialog.receiveSelection(snapshot);
     }
@@ -2654,11 +2618,12 @@
     async onShutdown() {
       for (const controller of controllers.values()) controller.destroy();
       controllers.clear();
+      await Zotero.ZotAgent.archive?.drain();
       if (preferencePaneID && Zotero.PreferencePanes.unregister) {
         Zotero.PreferencePanes.unregister(preferencePaneID);
       }
     },
   };
 
-  Zotero.ZotAgent = { hooks, controllers, runtimeManager: RuntimeManager };
+  Zotero.ZotAgent = { hooks, controllers, runtimeManager: RuntimeManager, utils: { markdownToNoteHTML } };
 })();

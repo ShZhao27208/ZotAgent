@@ -1,6 +1,6 @@
 # ZotAgent 版本与推送历史
 
-> 本文件记录本地可见的 Git 历史（含推送前待发布提交），不代表 GitHub 每次 push 的事件日志。每次推送前运行 `npm run version-history`；本地 `.githooks/pre-push` 会在历史变化且文件未更新时阻止推送。
+> 本文件记录本地可见的 Git 历史（含推送前待发布提交），不代表 GitHub 每次 push 的事件日志。推送前 hook 自动更新本地历史；实际推送成功后在文末独立记录，可随下一批修改提交。
 
 - 历史截至：2026-09-24T22:12:38+08:00
 - 项目：`ShZhao27208/ZotAgent`
@@ -47,7 +47,7 @@
 | `0.3.8` | 2026-09-24T16:59:59+08:00 | `8864a74` | fix(installer): extract local XPI without download URI credentials v0.3.8 |
 | `0.3.9` | 2026-09-24T17:12:17+08:00 | `78a69b4` | fix(installer): use bootstrap version instead of jar manifest HTTP read v0.3.9 |
 
-## 全部推送提交
+## 本地可见提交
 
 下表保留代码提交的短编号、作者时间、当时的 package 版本和提交说明；Git 无法还原每次 push 的实际时间，纯历史文件维护提交不列入表中。版本号表示该提交中的 `package.json` 版本；没有单独发版的修复也会保留。
 
@@ -112,5 +112,11 @@
 ## 维护规则
 
 1. 新提交或新远端引用出现后，运行 `npm run version-history`。
-2. 将本文件和生成脚本一起提交，再执行 `git push`。
-3. 如果 pre-push 检查提示历史已变化，先提交更新后的本文件，再重新推送。
+2. pre-push 更新本地历史，并检查版本及构建产物，不要求为历史再创建递归提交。
+3. 成功推送并核对远端 HEAD 后，在实际推送记录区域追加 SHA、提交时间、推送时间、分支、验证和产物信息。
+4. 推送后的本地记录可留到下一完整批次提交；生成器保留该区域原文。
+
+<!-- ACTUAL-PUSH-LEDGER -->
+## 实际推送记录
+
+仅在推送成功并核对远端 HEAD 后追加；不从 Git 作者时间推算。

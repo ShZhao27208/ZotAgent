@@ -267,6 +267,15 @@
   </groupbox>
 
   <groupbox>
+    <label><html:h2>对话历史归档</html:h2></label>
+    <html:p class="zotagent-help">同一主文献的三个 Agent 和多个窗口共用记忆笔记。仅在完成、失败或中断时归档；不调用模型，不保存思考过程或 PDF 全文。手动“保存子笔记”用于单独收藏回答。</html:p>
+    <html:div id="zotagent-archive-settings" class="zotagent-pref-grid"></html:div>
+    <html:p id="zotagent-archive-name-preview" class="zotagent-help"></html:p>
+    <html:p id="zotagent-archive-settings-status" class="zotagent-help"></html:p>
+    <html:p class="zotagent-help">命名设置仅影响新笔记；更改排序会重排当前归档笔记，保留已有正文。全文不主动截断，仍受请求体大小、CLI 和模型上下文限制。</html:p>
+  </groupbox>
+
+  <groupbox>
     <label><html:h2>快捷键</html:h2></label>
     <html:div class="zotagent-pref-grid">
       <html:label for="zotagent-shortcut">打开/关闭对话框</html:label>
