@@ -2,9 +2,9 @@
 
 > 本文件记录本地可见的 Git 历史（含推送前待发布提交），不代表 GitHub 每次 push 的事件日志。推送前 hook 自动更新本地历史；实际推送成功后在文末独立记录，可随下一批修改提交。
 
-- 历史截至：2026-09-26T02:59:34+08:00
+- 历史截至：2026-09-26T03:53:01+08:00
 - 项目：`ShZhao27208/ZotAgent`
-- 可见提交：58 个（按 Git 提交时间升序）
+- 可见提交：59 个（按 Git 提交时间升序）
 - 时间：ISO 8601，带时区
 
 ## 远端分支与标签
@@ -22,6 +22,7 @@
 | `v0.4.0` | `9ab91882bf00` | 2026-09-26T00:40:42+08:00 | feat: snapshot conversation archive implementation v0.4.0 |
 | `v0.4.2` | `0ac91bc45288` | 2026-09-26T02:22:51+08:00 | fix: runtime environments, archive templates and compact chat v0.4.2 |
 | `v0.4.3` | `9804bfd25f06` | 2026-09-26T02:59:34+08:00 | feat: select archive notes and restore native agent sessions v0.4.3 |
+| `v0.4.4` | `6983166c4c97` | 2026-09-26T03:53:01+08:00 | fix: show structured sessions in native resume pickers v0.4.4 |
 
 ## 正式版本
 
@@ -52,6 +53,7 @@
 | `0.4.0` | 2026-09-26T00:40:42+08:00 | `9ab9188` | feat: snapshot conversation archive implementation v0.4.0 |
 | `0.4.2` | 2026-09-26T02:22:51+08:00 | `0ac91bc` | fix: runtime environments, archive templates and compact chat v0.4.2 |
 | `0.4.3` | 2026-09-26T02:59:34+08:00 | `9804bfd` | feat: select archive notes and restore native agent sessions v0.4.3 |
+| `0.4.4` | 2026-09-26T03:53:01+08:00 | `6983166` | fix: show structured sessions in native resume pickers v0.4.4 |
 
 ## 本地可见提交
 
@@ -117,6 +119,7 @@
 | 56 | 2026-09-26T00:40:42+08:00 | `0.4.0` | `9ab9188` | feat: snapshot conversation archive implementation v0.4.0 |
 | 57 | 2026-09-26T02:22:51+08:00 | `0.4.2` | `0ac91bc` | fix: runtime environments, archive templates and compact chat v0.4.2 |
 | 58 | 2026-09-26T02:59:34+08:00 | `0.4.3` | `9804bfd` | feat: select archive notes and restore native agent sessions v0.4.3 |
+| 59 | 2026-09-26T03:53:01+08:00 | `0.4.4` | `6983166` | fix: show structured sessions in native resume pickers v0.4.4 |
 
 ## 维护规则
 
@@ -171,3 +174,17 @@
 - 产物：`dist/zotagent-0.4.3.xpi`，14080921 字节。
 - SHA-256：`a41c3e52a0cc9395c0b2024d7b55bea25176115d778757f5dc3ebe0253ce3f32`。
 - 本条按约定仅在本地追加，留待下一完整批次提交，不为记录自身再次推送。
+
+### 0.4.4 原生终端默认显示插件会话
+
+- 提交：`6983166c4c9762dcb41d5491e5c05086dfc75f48`（`6983166`）。
+- Git committer 时间：2026-09-26T03:53:01+08:00。
+- 推送成功、远端核对及安装包上传后的记录时间：2026-09-26T03:55:48+08:00（Asia/Shanghai；未追溯精确网络完成时刻）。
+- 远端：`origin` / `git@github.com:ShZhao27208/ZotAgent.git`。
+- 分支：`fix/auto-detect-runtime-and-cli-paths`；标签：`v0.4.4`。一次 `git push --atomic` 推送；`git ls-remote` 已核对分支和标签均为上述完整 SHA。
+- 预览版及安装包：https://github.com/ShZhao27208/ZotAgent/releases/tag/v0.4.4 。
+- 主要改动：Codex 默认打开包含非交互历史的恢复列表；Claude 原生终端以 SDK 入口显示之前插件对话；跨环境子进程变量传递、跨窗口占用保护、恢复信息和 README；详见 `RELEASE-0.4.4.md`。
+- 验证：149 项，148 通过、1 项 Windows 专用测试跳过；构建和安装包一致性检查通过。真实 Claude 2.1.282 TUI 已在临时测试配置下验证列出 SDK 来源记录，选中后显示测试问题与回答。没有付费模型调用、浏览器下载或独立 Zotero 窗口；Windows Zotero 内嵌终端仍待本机验收。
+- 产物：`dist/zotagent-0.4.4.xpi`，14081854 字节。
+- SHA-256：`95b2aca4ad38640e04e950f49aa581655eac621ecf1d43e5ac3199f97234a3f5`。
+- 本条按约定仅在推送完成后本地追加，留待下一完整批次提交，不为记录自身再次推送。
