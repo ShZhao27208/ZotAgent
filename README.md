@@ -388,7 +388,7 @@ ZotAgent 仍处于快速迭代阶段。不同 Zotero、OpenCode、Codex CLI 和 
 
 由插件新启动的 Windows / WSL Runtime 使用隐藏窗口；在设置中的“连接并检测”查看环境、监听端口、PID 和连接地址。已经打开的旧控制台不会被强制关闭；保存现有工作后退出 Zotero、关闭已确认属于 ZotAgent 的旧 Runtime 控制台，再重新打开 Zotero，可验证隐藏启动。插件不会修改 WSL 的代理设置。
 
-自动归档仅涵盖结构化聊天；在原生终端新增的消息不自动归档。0.4.3 起，Claude Code 与 Codex 的“打开原生终端”会按当前结构化会话 ID 恢复，避免 Claude 原先仅打开独立界面的情况。打开终端前应等待回答结束，或点击停止；停止后的中断记录会保留。终端的“会话信息与恢复方法”可展开查看实际会话 ID、CLI 路径、环境、工作目录及恢复命令。
+自动归档仅涵盖结构化聊天；在原生终端新增的消息不自动归档。0.4.4 起，Claude Code 与 Codex 的“打开原生终端”默认打开包含插件历史的恢复列表，由用户选择对话。Codex 自动执行 `codex resume --all --include-non-interactive`；Claude 自动在此终端设置 `CLAUDE_CODE_ENTRYPOINT=sdk-cli` 后执行 `claude --resume`。打开前应等待回答结束，或点击停止并等任务退出。列表支持选择任意会话，Runtime 无法得知选择结果，因此终端打开期间阻止其他窗口向同一 Agent 提交结构化问题；关闭终端后解除。终端的“会话信息与恢复方法”显示 CLI、环境、目录和原结构化会话 ID（供核对，不代表列表已选中它）。
 
 
 ### 选择已有子笔记与归档样式（0.4.3）
@@ -397,13 +397,38 @@ ZotAgent 仍处于快速迭代阶段。不同 Zotero、OpenCode、Codex CLI 和 
 
 笔记新增、删除和重命名后列表自动刷新。新归档条目中的 Agent 标题、问题/回答标题、主文献和时间标签使用加粗、配色和底纹区分；正文保持正常样式。已有笔记正文不批量重新排版。Markdown 导出保留标题和文字层级，纯 Markdown 不保留字体颜色。
 
-### Codex `/resume` 找不到结构化会话
+### Codex / Claude 原生恢复列表
 
-ZotAgent 使用 `codex exec` 创建结构化会话。本机 Codex 0.156.1 及当前官方 CLI 文档说明，恢复列表默认过滤非交互会话；工作目录还会影响列表范围。请在相同 Windows/WSL 环境运行：
+ZotAgent 使用 `codex exec` 创建结构化会话。本机 Codex 0.156.1 及当前官方 CLI 文档说明，恢复列表默认过滤非交互会话；工作目录还会影响列表范围。插件按钮已自动应用以下参数，独立终端也可在相同 Windows/WSL 环境运行：
 
 ```bash
 codex resume --all --include-non-interactive
 ```
+
+该参数控制启动时的恢复列表，不承诺之后在 Codex 内再次执行 `/resume` 也保留相同筛选。需要重新选择时，可关闭并重新打开插件原生终端。结构化聊天仍使用原来的 `codex exec`，没有迁移到 App Server。
+
+Claude Code 2.1.282 会在普通入口的恢复列表隐藏 `sdk-cli` 等来源，而插件的 `--print` 对话正属于这一类。可以在 WSL 运行：
+
+```bash
+cd /home/shzhao  # 本机示例；其他用户应改为会话实际工作目录
+CLAUDE_CODE_ENTRYPOINT=sdk-cli claude --resume
+```
+
+该环境变量只作用于本次 Claude 进程。列表默认按项目目录筛选，按 **Ctrl+A** 可显示所有项目。若已在某条会话中，Claude 的 `/resume` 会排除当前会话。
+
+Windows PowerShell 中可临时设置并在退出后还原：
+
+```powershell
+$zotAgentPreviousEntrypoint = $env:CLAUDE_CODE_ENTRYPOINT
+try {
+    $env:CLAUDE_CODE_ENTRYPOINT = 'sdk-cli'
+    claude --resume
+} finally {
+    $env:CLAUDE_CODE_ENTRYPOINT = $zotAgentPreviousEntrypoint
+}
+```
+
+插件会自动设置子进程环境，包括 Windows Runtime 启动 WSL Agent 的情况；无需修改系统环境变量、CLI 安装或历史文件。这个 Claude 入口变量是针对本机 2.1.282 实现验证的兼容办法，不是官方承诺稳定的 `--include-non-interactive` 参数。升级 CLI 后若行为变化，可按 ID 直接恢复。名称为 `(session)`、约 14.7KB 的空初始化记录可能仍在列表中，它们本来就没有问题和回答；此改动让真正的 SDK 对话也进入列表，不会给空记录补写内容。
 
 也可以按“会话信息”中的准确 ID 直接恢复，不依赖列表：
 

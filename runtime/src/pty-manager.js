@@ -60,5 +60,5 @@ export function closePtySession(id) {
 }
 
 export function listPtySessions() {
-  return [...ptySessions.values()].map((session) => ({ id: session.id, alive: session.alive, exitCode: session.exitCode, agent: session.agent, nativeSessionID: session.nativeSessionID }));
+  return [...ptySessions.values()].map((session) => ({ id: session.id, alive: session.alive, exitCode: session.exitCode, agent: session.agent, nativeSessionID: session.nativeSessionID, resumePicker: session.resumePicker === true }));
 }

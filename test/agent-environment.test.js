@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture } from './helpers/plugin-fixture.js';
-import { toWSLPath, pathMatchesPlatform } from '../runtime/src/agent-launch.js';
+import { toWSLPath, pathMatchesPlatform, createAgentLauncher, nativePlatform } from '../runtime/src/agent-launch.js';
 
 const key=name=>'extensions.zotagent.'+name;
 test('Windows Runtime forwards per-agent WSL choice and clears mismatched paths before detection',async()=>{
@@ -38,11 +38,11 @@ test('host profiles restore Windows and WSL settings instead of converting one i
 });
 test('healthy but wrong host or old protocol is not silently reused',async()=>{
   const f=fixture();f.Zotero.isWin=true;const m=f.api.RuntimeManager;
-  m.request=async()=>({ok:true,json:async()=>({platform:'wsl',protocolVersion:4})});
+  m.request=async()=>({ok:true,json:async()=>({platform:'wsl',protocolVersion:5})});
   assert.equal(await m.probe(),'wrong-environment');
   m.request=async()=>({ok:true,json:async()=>({platform:'windows',protocolVersion:2})});
   assert.equal(await m.probe(),'outdated');
-  m.request=async()=>({ok:true,json:async()=>({platform:'windows',protocolVersion:4})});
+  m.request=async()=>({ok:true,json:async()=>({platform:'windows',protocolVersion:5})});
   assert.equal(await m.probe(),'running');
 });
 test('custom endpoint is preserved when environment does not match',async()=>{
@@ -56,6 +56,21 @@ test('Windows image and working-directory paths cross the WSL boundary literally
   assert.equal(toWSLPath('\\\\wsl.localhost\\Ubuntu\\home\\user\\work'),'/home/user/work');
   assert.equal(pathMatchesPlatform('/home/user/codex','windows'),false);
   assert.equal(pathMatchesPlatform('C:\\bin\\codex.exe','windows'),true);
+});
+
+test('terminal environment survives native and cross-host launch without changing Runtime environment',()=>{
+  const before=process.env.CLAUDE_CODE_ENTRYPOINT;
+  const launcher=createAgentLauncher({shell:{name:'bash'},defaultCwd:'/runtime'});
+  const built={args:['--resume'],cwd:'/work',env:{CLAUDE_CODE_ENTRYPOINT:'sdk-cli'}};
+  const native=launcher.invocation({platform:nativePlatform,executable:'/bin/claude'},built,'claude-code');
+  assert.deepEqual(native.env,built.env);
+  // Exercise the WSL wrapper constructor irrespective of the test host platform.
+  const remote={platform:nativePlatform==='windows'?'wsl':'windows',executable:'/bin/claude',distro:'Ubuntu'};
+  const wsl=launcher.invocation(remote,built,'claude-code');
+  assert.equal(wsl.command,'wsl.exe');
+  assert.match(wsl.args.at(-1),/export CLAUDE_CODE_ENTRYPOINT='sdk-cli'\nexec/);
+  assert.throws(()=>launcher.invocation(remote,{...built,env:{'INVALID;name':'x'}},'claude-code'),/Invalid Agent environment/);
+  assert.equal(process.env.CLAUDE_CODE_ENTRYPOINT,before);
 });
 
 test('Windows and WSL runtime launches hide the console without shell argument re-parsing',()=>{

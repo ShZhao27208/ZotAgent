@@ -55,11 +55,16 @@ test("Claude creates and resumes explicit native sessions", () => {
   assert.ok(resumed.args.includes("session-1"));
 });
 
-test("native terminals start top-level interactive clients", () => {
+test("native terminals open history pickers including structured sessions", () => {
   assert.deepEqual(adapters.opencode.interactiveArgs("session-1", request.cwd).args, [request.cwd]);
-  assert.deepEqual(adapters["claude-code"].interactiveArgs("session-1", request.cwd).args, ["--resume", "session-1"]);
-  assert.deepEqual(adapters["claude-code"].interactiveArgs(null, request.cwd).args, []);
-  assert.deepEqual(adapters.codex.interactiveArgs("session-1", request.cwd).args, ["--cd", request.cwd, "resume", "session-1"]);
+  for (const id of [null, "session-1"]) {
+    const claude = adapters["claude-code"].interactiveArgs(id, request.cwd);
+    assert.deepEqual(claude.args, ["--resume"]);
+    assert.deepEqual(claude.env, {CLAUDE_CODE_ENTRYPOINT: "sdk-cli"});
+    const codex = adapters.codex.interactiveArgs(id, request.cwd);
+    assert.deepEqual(codex.args, ["--cd", request.cwd, "resume", "--all", "--include-non-interactive"]);
+    assert.equal(claude.resumePicker, true); assert.equal(codex.resumePicker, true);
+  }
 });
 
 test("Codex adapter passes --image for request files", () => {

@@ -98,10 +98,11 @@ function terminateProcess(child) {
   }
 }
 
-function assertSessionIdle(agent, nativeSessionID) {
-  if (!nativeSessionID) return;
-  const active = [...running.values()].some(entry => entry.request.agent === agent && entry.request.nativeSessionID === nativeSessionID);
-  const terminal = listPtySessions().some(session => session.alive && session.agent === agent && session.nativeSessionID === nativeSessionID);
+function assertSessionIdle(agent, nativeSessionID, resumePicker = false) {
+  // A native picker can select any session and does not report its selection.
+  // Reserve this Agent while it is open so another window cannot write to it.
+  const active = [...running.values()].some(entry => entry.request.agent === agent && (resumePicker || nativeSessionID && entry.request.nativeSessionID === nativeSessionID));
+  const terminal = listPtySessions().some(session => session.alive && session.agent === agent && (resumePicker || session.resumePicker || nativeSessionID && session.nativeSessionID === nativeSessionID));
   if (active || terminal) throw new Error("该会话仍在执行、停止中或已在原生终端打开，请等待任务退出或先关闭原生终端");
 }
 
@@ -332,7 +333,7 @@ const server = http.createServer(async (request, response) => {
       }
       writeJSON(response, 200, {
         status: "ok",
-        protocolVersion: 4,
+        protocolVersion: 5,
         platform: nativePlatform,
         wslDistro: process.env.WSL_DISTRO_NAME || null,
         cwdExists,
@@ -453,13 +454,15 @@ const server = http.createServer(async (request, response) => {
       if (location.platform === "wsl" && process.platform === "win32") cwd = cwd === config.defaultCwd ? location.defaultCwd : toWSLPath(cwd);
       if (!pathMatchesPlatform(cwd, location.platform)) cwd = location.defaultCwd;
       const nativeSessionID = body.sessionID ? String(body.sessionID) : null;
-      assertSessionIdle(agent, nativeSessionID);
       const interactive = adapter.interactiveArgs(nativeSessionID, cwd);
+      assertSessionIdle(agent, nativeSessionID, interactive.resumePicker);
       const ptyInvocation = launcher.invocation(location, interactive, agent);
-      const session = createPtySession(ptyInvocation.command, ptyShellArgs(ptyInvocation), ptyInvocation.cwd, {}, { cols: body.cols, rows: body.rows });
-      const resumedID = agent === "opencode" ? null : nativeSessionID;
+      const session = createPtySession(ptyInvocation.command, ptyShellArgs(ptyInvocation), ptyInvocation.cwd, ptyInvocation.env || {}, { cols: body.cols, rows: body.rows });
+      const resumedID = agent === "opencode" || interactive.resumePicker ? null : nativeSessionID;
       session.agent = agent; session.nativeSessionID = resumedID;
+      session.resumePicker = interactive.resumePicker === true;
       writeJSON(response, 200, { ptyID: session.id, agent, cwd, nativeSessionID: resumedID,
+        resumeMode: session.resumePicker ? "picker" : "direct", previousNativeSessionID: nativeSessionID,
         platform: location.platform, wslDistro: location.distro || (location.platform === "wsl" ? process.env.WSL_DISTRO_NAME || null : null), executable: location.executable });
       return;
     }

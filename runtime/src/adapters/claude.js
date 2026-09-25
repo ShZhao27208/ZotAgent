@@ -46,8 +46,10 @@ export class ClaudeAdapter extends AgentAdapter {
   get supportsImages() { return true; }
 
   interactiveArgs(sessionID, cwd) {
-    // --print sessions are persisted by the CLI and can be resumed by ID.
-    return { args: sessionID ? ["--resume", sessionID] : [], cwd };
+    // Claude 2.1.282 hides sdk-* transcripts from a normal CLI picker.
+    // Scope this compatibility setting to the terminal child; it exposes existing
+    // SDK histories without rewriting transcripts or changing structured calls.
+    return { args: ["--resume"], cwd, resumePicker: true, env: { CLAUDE_CODE_ENTRYPOINT: "sdk-cli" } };
   }
 
   sessionDirectory() {

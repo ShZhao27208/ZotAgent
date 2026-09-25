@@ -2,9 +2,9 @@
 
 > 本文件记录本地可见的 Git 历史（含推送前待发布提交），不代表 GitHub 每次 push 的事件日志。推送前 hook 自动更新本地历史；实际推送成功后在文末独立记录，可随下一批修改提交。
 
-- 历史截至：2026-09-26T02:22:51+08:00
+- 历史截至：2026-09-26T02:59:34+08:00
 - 项目：`ShZhao27208/ZotAgent`
-- 可见提交：57 个（按 Git 提交时间升序）
+- 可见提交：58 个（按 Git 提交时间升序）
 - 时间：ISO 8601，带时区
 
 ## 远端分支与标签
@@ -21,6 +21,7 @@
 | `v0.3.9` | `78a69b49d1db` | 2026-09-24T17:12:17+08:00 | fix(installer): use bootstrap version instead of jar manifest HTTP read v0.3.9 |
 | `v0.4.0` | `9ab91882bf00` | 2026-09-26T00:40:42+08:00 | feat: snapshot conversation archive implementation v0.4.0 |
 | `v0.4.2` | `0ac91bc45288` | 2026-09-26T02:22:51+08:00 | fix: runtime environments, archive templates and compact chat v0.4.2 |
+| `v0.4.3` | `9804bfd25f06` | 2026-09-26T02:59:34+08:00 | feat: select archive notes and restore native agent sessions v0.4.3 |
 
 ## 正式版本
 
@@ -50,6 +51,7 @@
 | `0.3.9` | 2026-09-24T17:12:17+08:00 | `78a69b4` | fix(installer): use bootstrap version instead of jar manifest HTTP read v0.3.9 |
 | `0.4.0` | 2026-09-26T00:40:42+08:00 | `9ab9188` | feat: snapshot conversation archive implementation v0.4.0 |
 | `0.4.2` | 2026-09-26T02:22:51+08:00 | `0ac91bc` | fix: runtime environments, archive templates and compact chat v0.4.2 |
+| `0.4.3` | 2026-09-26T02:59:34+08:00 | `9804bfd` | feat: select archive notes and restore native agent sessions v0.4.3 |
 
 ## 本地可见提交
 
@@ -114,6 +116,7 @@
 | 55 | 2026-09-24T22:12:38+08:00 | `0.3.10` | `06d43a6` | fix(windows): preserve CMD wrapper arguments for agent execution v0.3.10 |
 | 56 | 2026-09-26T00:40:42+08:00 | `0.4.0` | `9ab9188` | feat: snapshot conversation archive implementation v0.4.0 |
 | 57 | 2026-09-26T02:22:51+08:00 | `0.4.2` | `0ac91bc` | fix: runtime environments, archive templates and compact chat v0.4.2 |
+| 58 | 2026-09-26T02:59:34+08:00 | `0.4.3` | `9804bfd` | feat: select archive notes and restore native agent sessions v0.4.3 |
 
 ## 维护规则
 
@@ -154,3 +157,17 @@
 - 产物：`dist/zotagent-0.4.2.xpi`，14078436 字节。
 - SHA-256：`298cc056a03608e5f90dfc9c574a266119680f432ed02e23524fe27248a9de34`。
 - 本条为推送完成后的本地记录，按约定留待下一完整批次提交，不为记录自身再追加推送。
+
+### 0.4.3 已有子笔记选择、归档样式与原生会话恢复
+
+- 提交：`9804bfd25f061c38fda77d14e8fd6f64a4c092cb`（`9804bfd`）。
+- Git committer 时间：2026-09-26T02:59:34+08:00。
+- 推送成功、远端核对及安装包上传后的记录时间：2026-09-26T03:01:50+08:00（Asia/Shanghai；未追溯精确网络完成时刻）。
+- 远端：`origin` / `git@github.com:ShZhao27208/ZotAgent.git`。
+- 分支：`fix/auto-detect-runtime-and-cli-paths`；标签：`v0.4.3`。一次 `git push --atomic` 推送；`git ls-remote` 已核对分支和标签均为上述完整 SHA。
+- 预览版及安装包：https://github.com/ShZhao27208/ZotAgent/releases/tag/v0.4.3 。
+- 主要改动：已有子笔记计数/选择、跨窗口目标同步、新归档元数据配色、Claude 按 ID 恢复、Codex 恢复方法与会话信息、同一会话并发保护；详见 `RELEASE-0.4.3.md`。
+- 验证：146 项，145 通过、1 项 Windows 专用测试跳过；构建及安装包一致性检查通过。集成测试仅运行临时模拟 CLI；未启动 Zotero/浏览器或调用模型。真实 GUI 与 Claude 原生内容显示仍待用户验收。
+- 产物：`dist/zotagent-0.4.3.xpi`，14080921 字节。
+- SHA-256：`a41c3e52a0cc9395c0b2024d7b55bea25176115d778757f5dc3ebe0253ce3f32`。
+- 本条按约定仅在本地追加，留待下一完整批次提交，不为记录自身再次推送。

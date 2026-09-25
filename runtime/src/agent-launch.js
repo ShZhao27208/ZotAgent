@@ -80,7 +80,11 @@ export function createAgentLauncher(config) {
   }
   function invocation(location, invocation, agent) {
     if (location.platform === nativePlatform) return { ...invocation, ...nativeInvocation(location.executable, invocation.args, agent, config.shell) };
-    const script = `export NVM_DIR="\${NVM_DIR:-$HOME/.nvm}"\n[ ! -s "$NVM_DIR/nvm.sh" ] || . "$NVM_DIR/nvm.sh"\nexport PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"\nexec ${[location.executable, ...invocation.args].map(quote).join(" ")}`;
+    const environment = Object.entries(invocation.env || {}).map(([name, value]) => {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error("Invalid Agent environment variable name");
+      return `export ${name}=${quote(value)}`;
+    }).join("\n");
+    const script = `export NVM_DIR="\${NVM_DIR:-$HOME/.nvm}"\n[ ! -s "$NVM_DIR/nvm.sh" ] || . "$NVM_DIR/nvm.sh"\nexport PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"\n${environment}\nexec ${[location.executable, ...invocation.args].map(quote).join(" ")}`;
     return { ...invocation, command: "wsl.exe", args: ["-d", location.distro, "--cd", invocation.cwd || location.defaultCwd, "--exec", "/bin/bash", "-l", "-c", script], cwd: config.defaultCwd };
   }
   return { resolve, invocation, clear: () => discovered.clear() };

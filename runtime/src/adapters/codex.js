@@ -31,8 +31,6 @@ export class CodexAdapter extends AgentAdapter {
   get supportsImages() { return true; }
 
   interactiveArgs(sessionID, cwd) {
-    const args = ["--cd", cwd];
-    if (sessionID) args.push("resume", sessionID);
-    return { args, cwd };
+    return { args: ["--cd", cwd, "resume", "--all", "--include-non-interactive"], cwd, resumePicker: true };
   }
 }

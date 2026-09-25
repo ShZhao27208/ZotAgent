@@ -130,3 +130,14 @@ test('native session information identifies exact recovery context and the non-i
   assert.match(dialog.terminalInfoText.textContent,/--include-non-interactive/);
   assert.match(dialog.terminalInfoText.textContent,/\/original\/cwd/);
 });
+test('native picker information does not claim it has already resumed the previous session',()=>{
+  const f=fixture(),dialog=f.dialog();
+  for (const agent of ['codex','claude-code']) {
+    dialog.agent=agent;
+    dialog.showTerminalInfo({resumeMode:'picker',nativeSessionID:null,previousNativeSessionID:'old-id',platform:'wsl',cwd:'/work',executable:'/bin/agent'});
+    const text=dialog.terminalInfoText.textContent;
+    assert.match(text,/请选择一条历史对话/);assert.match(text,/供核对.*old-id/);
+    assert.doesNotMatch(text,/恢复会话：|独立原生会话/);
+    assert.match(text,agent==='codex'?/codex resume --all --include-non-interactive/:/CLAUDE_CODE_ENTRYPOINT=sdk-cli claude --resume/);
+  }
+});

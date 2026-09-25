@@ -136,7 +136,7 @@
           this._health = health;
           if ((health.platform || health.shell?.platform) !== this.desiredPlatform()) return "wrong-environment";
           if (this.desiredPlatform() === "wsl" && health.wslDistro && health.wslDistro !== String(pref("wslDistro", "Ubuntu"))) return "wrong-environment";
-          if (Number(health.protocolVersion || 0) < 4) return "outdated";
+          if (Number(health.protocolVersion || 0) < 5) return "outdated";
           const incorrectHomeCase = health.cwdExists === false && cwd.toLowerCase() === health.defaultCwd?.toLowerCase();
           if ((!cwd || incorrectHomeCase || (Zotero.isWin && pref("runtimeHost", "auto") !== "wsl" && cwd.startsWith("/"))) && health.defaultCwd && (/^[a-z]:[\\/]/i.test(health.defaultCwd) || health.defaultCwd.startsWith("/"))) {
             setPref("defaultWorkingDirectory", health.defaultCwd);
@@ -2275,6 +2275,19 @@
     }
 
     showTerminalInfo(data) {
+      if (data.resumeMode === "picker") {
+        const command = this.agent === "codex" ? "codex resume --all --include-non-interactive" : "CLAUDE_CODE_ENTRYPOINT=sdk-cli claude --resume";
+        const lines = ["已打开原生会话恢复列表，请选择一条历史对话。",
+          `环境：${data.platform || "未知"}${data.wslDistro ? ` / ${data.wslDistro}` : ""}`,
+          `工作目录：${data.cwd}`, `CLI：${data.executable || ""}`,
+          data.previousNativeSessionID ? `当前结构化聊天的会话 ID（供核对）：${data.previousNativeSessionID}` : "当前结构化聊天尚无会话 ID。",
+          data.platform === "windows" && this.agent === "claude-code" ? 'PowerShell：$env:CLAUDE_CODE_ENTRYPOINT="sdk-cli"; claude --resume' : command,
+          this.agent === "codex" ? "列表包含非交互会话及其他工作目录的会话；这里选择后不保证后续 /resume 保持相同筛选。" : "已为此终端启用 SDK 会话显示；Claude 默认按目录筛选，可在恢复列表按 Ctrl+A 显示所有项目。",
+          "为避免重复写入，关闭此原生终端后才能在其他窗口继续向同一 Agent 提问。原生终端中的新增消息不会自动归档。"];
+        this.terminalInfoText.textContent = lines.join("\n");
+        this.terminalInfo.title = "原生会话恢复列表";
+        return;
+      }
       const id = data.nativeSessionID;
       const command = id && this.agent === "codex" ? `codex resume ${id}` : id && this.agent === "claude-code" ? `claude --resume ${id}` : "未指定会话 ID，打开的是独立原生终端。";
       const lines = [id ? `恢复会话：${id}` : "独立原生会话", `环境：${data.platform || "未知"}${data.wslDistro ? ` / ${data.wslDistro}` : ""}`,
