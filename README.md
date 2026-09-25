@@ -114,7 +114,7 @@ Zotero PDF / 条目 / 选区 / 截图
 
 Windows 安装包包含 Runtime 源码和 Windows x64/ARM64 PTY 依赖，不包含 Node.js。首次启动自动解压到 Zotero 数据目录的 `zotagent/runtime/<版本>/`，通过 PATH、常见安装位置查找本机 Node.js 24+ 并保存路径。无需 WSL，也无需保留构建源码目录。
 
-默认使用 Windows 原生后端。需要原有 WSL 环境的用户可在“后端启动位置”选择 WSL，并保留手动 WSL 路径配置。Windows 与 WSL Agent 的自动跨环境候选选择尚未实现。
+默认使用 Windows 原生后端。0.4.2 的配置入口区分两种方式：后端保持“自动”，仅将某个 Agent 环境选择为 WSL，由 Windows 后端调用该发行版中的 CLI；或者将整个后端切换到“WSL（手动高级配置）”，并配置 WSL 内的 Runtime 源码、依赖和 Node 路径。0.4.2 包含环境切换、OpenCode 完整输入、命名模板和聊天布局修复；0.4.0 安装包不包含这些修复。
 
 ### 从源码构建
 
@@ -140,9 +140,106 @@ dist/zotagent-<package.json 中的版本>.xpi
 
 ### Runtime Host
 
-Windows 默认无需填写 Runtime 路径：插件自动安装内置后端并查找本机 Node。安装 Node 后需重启 Zotero刷新 PATH；未检测到时可在高级设置填写 `node.exe` 的 Windows 绝对路径，然后点击“立即启动”。默认只监听本机，Token 自动生成。
+Windows 默认无需填写 Runtime 路径：插件自动安装内置后端并查找本机 Node。安装 Node 后需重启 Zotero刷新 PATH；未检测到时可在高级设置填写 `node.exe` 的 Windows 绝对路径，然后点击“连接并检测”（旧版按钮名为“立即启动”）。默认只监听本机，Token 自动生成。
 
 “WSL（手动高级配置）”仅供已安装 WSL 的用户选择，需要在 WSL 安装 Node、Runtime 依赖，并指定脚本与 Node 路径。它不是 Windows 安装的前置条件。
+
+### 本机 WSL 后端填写示例
+
+以下路径于 2026-09-26 在本机核对存在；其他电脑请用下方命令查询自己的路径。在 `Zotero 设置 → ZotAgent` 中先选择后端启动位置，再填写路径，避免切换环境时配置被对应环境的已保存值替换。
+
+| 设置项 | 本机填写值 |
+| --- | --- |
+| 后端启动位置 | WSL（手动高级配置） |
+| WSL 发行版 | `Ubuntu` |
+| Runtime 脚本 | `/home/shzhao/AGitRep/SelfRep/ZotAgent/runtime/src/index.js` |
+| Runtime Node.js | `/home/shzhao/.nvm/versions/node/v24.18.0/bin/node` |
+| 默认工作目录 | `/home/shzhao` |
+| 三个 Agent 的运行环境 | WSL (Linux)，或者自动（跟随 WSL 后端） |
+
+Runtime 脚本填写 `index.js` 文件，Node 填写可执行文件，默认工作目录填写已存在的文件夹。WSL 字段使用 `/home/...` 格式，不填写 Windows 资源管理器显示的 `\wsl.localhost\Ubuntu\...`，也不要在字段值外加引号。工作目录是 Agent 工作的位置，不是 Runtime 源码的位置；需要处理某个项目时，可改为该项目的 WSL 目录。
+
+在 **Ubuntu / WSL 终端**查询并核对：
+
+```bash
+cd /home/shzhao/AGitRep/SelfRep/ZotAgent
+realpath runtime/src/index.js
+command -v node
+node --version
+printf '%s\n' "$HOME"
+command -v opencode
+command -v codex
+command -v claude
+```
+
+本机 `command -v node` 返回上表中的路径，版本为 `v24.18.0`。NVM 升级或切换 Node 版本后，应重新查询，更新 ZotAgent 的 Node 路径。在 **Windows PowerShell** 中可先查看发行版，再进入 Ubuntu 执行上述命令：
+
+```powershell
+wsl --list --verbose
+wsl -d Ubuntu
+```
+
+如果迁移源码或在新 WSL 环境安装依赖，在该项目目录中执行：
+
+```bash
+npm ci
+```
+
+`npm ci` 会按锁文件重新安装项目依赖。本机已经有 Linux `node-pty` 依赖，无需仅为填写设置重复安装。Windows XPI 内附的 Windows PTY 二进制不能替代 WSL/Linux 依赖。
+
+保存后点击“连接并检测”，再点各 Agent 的测试按钮。Endpoint 与 Token 通常沿用该环境的配置；Token 由插件生成，不需要粘贴到聊天或错误反馈中。
+
+### Windows Claude Code 路径与安装
+
+**本机检查结果（2026-09-26）：Windows PowerShell 的命令搜索及常见安装目录未找到 Claude Code。** WSL 内已经安装 Claude Code，但这不等于 Windows 也已安装，不能把 `/home/.../claude` 填到运行环境为 Windows 的路径字段。
+
+先在 **Windows PowerShell** 查询：
+
+```powershell
+Get-Command claude,claude.exe,claude.cmd -All -ErrorAction SilentlyContinue |
+  Select-Object Name,CommandType,Source,Path
+where.exe claude
+Test-Path "$env:USERPROFILE\.local\bin\claude.exe"
+```
+
+若查询没有结果，可使用 Claude Code 官方 Windows 安装脚本（由你手动执行；文档编辑不会自动安装）：
+
+```powershell
+irm https://claude.ai/install.ps1 | iex
+```
+
+安装后重新打开 PowerShell，查询和检查：
+
+```powershell
+Get-Command claude -All | Select-Object Name,Source,Path
+& "$env:USERPROFILE\.local\bin\claude.exe" --version
+```
+
+原生安装的常见路径是 `%USERPROFILE%\.local\bin\claude.exe`。本机对应以下值，**仅在安装完成且 `Test-Path` 返回 `True` 后填写**：
+
+```text
+C:\Users\ShZhao27208\.local\bin\claude.exe
+```
+
+若使用 npm 安装方式，可在 Windows PowerShell 执行以下命令并查询实际位置；两种安装方式选择其一即可：
+
+```powershell
+npm install -g @anthropic-ai/claude-code
+$claudeCmd = Join-Path (npm prefix -g).Trim() 'claude.cmd'
+$claudeCmd
+Test-Path $claudeCmd
+& $claudeCmd --version
+```
+
+npm 安装时 ZotAgent 可填写上面输出的 `claude.cmd` 路径；不要假定 npm 全局目录一定在 AppData。首次使用需先在 Windows 终端运行 `claude`（或 `& $claudeCmd`），按 CLI 提示完成登录/配置；再重启 Zotero，后端选择“自动”、Claude Code 运行环境选择“Windows”，填写实际路径并点击“测试 Claude Code”。`--version` 成功仅确认程序可以启动，仍需一次简短提问确认模型配置可用。
+
+如果只使用本机现有的 WSL Claude Code，无需额外安装 Windows 版。Claude Code 运行环境选择 `WSL (Linux)`，其已确认的本机命令路径为：
+
+```text
+/home/shzhao/.nvm/versions/node/v24.18.0/bin/claude
+```
+
+该命令指向 Linux 可执行文件；即使内部目标文件名带 `.exe`，也不能据此当作 Windows 程序使用。
 
 ### Agent 命令
 
@@ -222,7 +319,18 @@ Windows 默认自动部署后端，请确认已安装 Node.js 24+ 并重启 Zote
 
 ### OpenCode 模型服务失败
 
-在设置中填写明确的 `provider/model`，使用 OpenCode `models` 命令列出的有效模型。ZotAgent 只负责调用本地 OpenCode；模型供应商、额度和网络错误仍由 OpenCode/provider 返回。
+在 Zotero → 设置 → ZotAgent 的“OpenCode 临时模型”中填写 `provider/model` **实际 ID**，不能填界面显示名称。本机 WSL 检测到的有效 ID 包括 `opencode/mimo-v2.6-flash-free`；`MiMo-V2.6-Flash Free/OpenCode Zen` 不是这个模型的 ID。可在与插件所选环境一致的终端中核对：
+
+```bash
+opencode models
+opencode models opencode
+```
+
+Windows PowerShell 要调用 Windows 安装的 `opencode`；WSL Agent 则在对应发行版运行上述命令。模型列表查询不发起模型推理。列表存在不代表账户额度、网络及模型服务一定可用。
+
+留空时，ZotAgent **不传 `--model` 参数**，由 OpenCode 自身的配置、Agent 配置及插件决定；这不保证与交互终端最近选中的模型相同。本机还发现部分 OpenCode Agent 配置引用 `minimax/minimax-m2.5-free`。如果默认请求失败而明确填写 ID 成功，应核对对应环境中的 OpenCode / Agent 配置。ZotAgent 不自动改写原生配置，也不自动换模型重试。
+
+新版会显示嵌套错误中的具体消息和模型 ID，不再把带详细原因的失败统一显示为“Agent 返回错误”。全文提交数量表示已交给 CLI 的输入数量，不代表模型一定接纳了全部上下文。
 
 ### 更新后仍出现旧行为
 
@@ -262,3 +370,22 @@ ZotAgent 仍处于快速迭代阶段。不同 Zotero、OpenCode、Codex CLI 和 
 ## License
 
 项目当前未附带开源许可证。除非仓库后续明确添加许可证，否则代码版权仍归项目作者所有。
+
+
+### 记忆笔记命名与聊天窗口（0.4.2）
+
+进入 Zotero → 设置 → ZotAgent → 对话历史归档，在“命名模板”中直接输入格式，再用“插入字段”下拉菜单将字段加入光标位置。例如：
+
+```text
+{title}_ {tags}_ {author}_ {date}
+{date}{time}
+研究笔记_{YYYY}-{MM}-{DD}_{HH}{mm}_{sequence}
+```
+
+支持标题、短标题、标签、第一作者、全部作者、发表年份、DOI、条目 key、创建日期/时间、星期、序号及各日期时间分量。`{date}` 为创建日期，`{year}` 为文献发表年份；新安装默认仍为年月日时分，旧版命名配置自动转换为模板。日期/时间格式、时区、标题长度和序号补零均可选择。标签用逗号连接，缺失元数据留空，固定文字和分隔符按输入保留。修改仅影响之后新建的笔记，重名仍追加编号。
+
+聊天窗口顶部的“记忆”栏提供“打开 / 新建 / 导出”；完整笔记名可悬停查看。回答区随窗口伸缩，上方文献和选区按内容排列，空间不足时可滚动；截图不会将“清除”挤到下方。原生终端调整字符行列，不缩放字体或 PDF 选区。
+
+由插件新启动的 Windows / WSL Runtime 使用隐藏窗口；在设置中的“连接并检测”查看环境、监听端口、PID 和连接地址。已经打开的旧控制台不会被强制关闭；保存现有工作后退出 Zotero、关闭已确认属于 ZotAgent 的旧 Runtime 控制台，再重新打开 Zotero，可验证隐藏启动。插件不会修改 WSL 的代理设置。
+
+自动归档仅涵盖结构化聊天。Claude Code 原生终端当前启动独立交互界面，不能据此判断先前结构化会话的全文输入是否成功；跨界面会话可见性仍需在相同环境、工作目录和 CLI 版本中分别核对。

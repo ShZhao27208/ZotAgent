@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyRawEvent, extractModel, extractSessionID, extractText, parseAgentLine } from "../runtime/src/normalize.js";
+import { classifyRawEvent, extractError, extractModel, extractSessionID, extractText, parseAgentLine } from "../runtime/src/normalize.js";
 
 test("extracts model identifiers from native event shapes", () => {
   assert.equal(extractModel({ type: "session.started", model: "provider/model" }), "provider/model");
@@ -53,4 +53,11 @@ test('Claude streamed blocks followed by a snapshot are not duplicated',async()=
   const final={type:'assistant',message:{id:'m',content:[{type:'text',text:'first'},{type:'text',text:'last'}]}};
   assert.equal(extract(final),'last');assert.equal(extract(final),null);
   assert.equal(classifyRawEvent({type:'result',is_error:true}),'error');
+});
+
+test('OpenCode nested provider failures and unavailable model IDs remain actionable',()=>{
+  assert.equal(extractError({type:'error',error:{name:'APIError',data:{message:'Provider quota exceeded'}}}),'APIError · Provider quota exceeded');
+  assert.equal(extractError({type:'error',error:{name:'ProviderModelNotFoundError',data:{providerID:'opencode',modelID:'missing'}}}),'ProviderModelNotFoundError · 模型：opencode/missing');
+  assert.equal(extractError({type:'result',is_error:true,errors:['failed one','failed two']}),'failed one\nfailed two');
+  assert.equal(extractError({type:'turn.failed',error:{message:'context full'}}),'context full');
 });

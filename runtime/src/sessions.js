@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 
-const STORE_DIR = join(
+const STORE_DIR = process.env.ZOTAGENT_DATA_DIR || join(
   process.env.USERPROFILE || process.env.HOME || "/tmp",
   ".local/share/zotero-full-agent",
 );

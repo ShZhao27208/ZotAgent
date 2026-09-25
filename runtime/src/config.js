@@ -40,7 +40,7 @@ export function resolveClaudePath() {
 export function resolveFromPath(command, env = process.env, nodePath = process.execPath) {
   const home = env.USERPROFILE || env.HOME || "/tmp";
   const directories = [
-    ...(env.PATH || "").split(delimiter).filter(Boolean),
+    ...(env.PATH || env.Path || "").split(delimiter).filter(Boolean),
     ...(env.APPDATA ? [join(env.APPDATA, "npm")] : []),
     dirname(nodePath), join(home, ".local/bin"), join(home, ".npm-global/bin"),
     join(home, ".opencode/bin"), "/usr/local/bin", "/usr/bin",
@@ -90,6 +90,7 @@ export function loadConfig() {
     token,
     generatedToken,
     shell: shellDescriptor(),
+    wslDistro: process.env.ZOTAGENT_WSL_DISTRO || "Ubuntu",
     defaultCwd: process.env.ZOTAGENT_CWD || (process.platform === "win32" ? process.env.USERPROFILE || process.cwd() : process.env.HOME || "/tmp"),
     defaultWindowsCwd: process.env.ZOTAGENT_WIN_CWD || process.env.USERPROFILE || (process.platform === "win32" ? process.cwd() : "/mnt/c/Users"),
     executables: {

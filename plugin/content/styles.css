@@ -29,15 +29,15 @@
 
 .zotagent-dialog {
   position: fixed;
-  display: grid;
-  grid-template-rows: auto auto auto auto minmax(120px, 1fr) auto auto auto;
+  display: flex;
+  flex-direction: column;
   width: min(460px, calc(100vw - 24px));
   height: min(680px, calc(100vh - 36px));
   min-width: 320px;
-  min-height: 360px;
+  min-height: 420px;
   max-width: calc(100vw - 12px);
-  max-height: calc(100vh - 12px);
-  overflow: hidden;
+  max-height: calc(100vh - var(--za-top, 0px) - 12px);
+  overflow: auto;
   resize: both;
   pointer-events: auto;
   color: var(--fill-primary, #202124);
@@ -193,8 +193,8 @@
 }
 
 .zotagent-selection-box {
-  display: grid;
-  grid-template-columns: 1fr auto;
+  display: flex;
+  flex-direction: column;
   gap: 5px 8px;
   padding: 9px 12px;
   background: color-mix(in srgb, #e9f3fa 62%, transparent);
@@ -216,6 +216,8 @@
 }
 
 .zotagent-messages {
+  flex: 1 1 100px;
+  min-height: 60px;
   overflow: auto;
   padding: 13px 12px;
   background: var(--material-background, #fff);
@@ -261,7 +263,7 @@
 
 .zotagent-composer {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 6px;
   padding: 9px 12px;
   background: var(--material-background, #fff);
@@ -271,6 +273,8 @@
   box-sizing: border-box;
   width: 100%;
   height: 66px;
+  max-height: 120px;
+  grid-column: 1 / -1;
   resize: vertical;
 }
 
@@ -491,6 +495,7 @@
 
 .zotagent-pty-output {
   flex: 1;
+  min-height: 0;
   margin: 0;
   padding: 8px 10px;
   overflow-y: auto;
@@ -978,7 +983,7 @@
 
 .zotagent-pty-container { border-color: var(--za-line-strong); background: #f7fbfd; }
 .zotagent-pty-output { color: #24515a; background: #f7fbfd; }
-.zotagent-pty-output .xterm { height: 100%; padding: 8px 10px; }
+.zotagent-pty-output .xterm { height: 100%; padding: 0; }
 .zotagent-pty-output .xterm-viewport { background: #f7fbfd !important; }
 .zotagent-pty-input { color: #173f47; background: #eaf4f5; border-color: #bed5d9; }
 .zotagent-pty-input::placeholder { color: #7e989e; }
@@ -988,6 +993,17 @@
   border-color: var(--za-line-strong);
 }
 
-.zotagent-archive-bar { display: flex; flex-wrap: wrap; gap: 5px; padding: 6px 10px; border-top: 1px solid #d5e1e8; }
-.zotagent-archive-label { flex-basis: 100%; font-size: 11px; overflow-wrap: anywhere; }
+.zotagent-archive-bar { display: flex; align-items: center; gap: 4px; padding: 4px 10px; border-bottom: 1px solid var(--za-line); }
+.zotagent-archive-label { flex: 1; min-width: 0; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zotagent-archive-bar button { flex: 0 0 auto; padding: 0 6px; min-height: 24px; }
+.zotagent-archive-bar [hidden] { display: none; }
+.zotagent-dialog > :not(.zotagent-messages):not(.zotagent-pty-container):not(.zotagent-context-details) { flex: 0 0 auto; }
+.zotagent-context-details { flex: 0 1 auto; min-height: 0; max-height: 42%; overflow: auto; }
+.zotagent-selection-header { display: flex; align-items: center; gap: 6px; }
+.zotagent-selection-header .zotagent-selection-label { flex: 1; }
+.zotagent-selection-box > * { flex-shrink: 0; }
+.zotagent-selection-input { min-height: 42px; max-height: 100px; }
+.zotagent-status { max-height: 42px; overflow: auto; }
+.zotagent-actions { flex-wrap: wrap; }
+.zotagent-fulltext-status:empty, .zotagent-extra-items:empty { display: none; }
 .zotagent-fulltext-status { padding: 0 10px; white-space: pre-wrap; max-height: 80px; overflow-y: auto; font-size: 11px; }

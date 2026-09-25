@@ -7,6 +7,7 @@
   const pdfTextCache = new Map();
   let dialogSequence = 0;
   let preferencePaneID = null;
+  let shuttingDown = false;
 
   function getReaderIframeWindow(reader) {
     const candidates = [
@@ -87,9 +88,38 @@
       return { ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, json: async () => xhr.response };
     },
 
+    desiredPlatform() {
+      return Zotero.isWin && pref("runtimeHost", "auto") !== "wsl" ? "windows" : "wsl";
+    },
+
+    selectRuntimeProfile() {
+      const key = this.desiredPlatform() === "windows" ? "windows" : "wsl:" + String(pref("wslDistro", "Ubuntu")).trim();
+      const fields = ["runtimeEndpoint", "runtimeScriptPath", "runtimeNodePath", "defaultWorkingDirectory", "opencodePath", "codexPath", "claudePath", "opencodePlatform", "codexPlatform", "claudePlatform"];
+      let profiles = {};
+      try { profiles = JSON.parse(pref("runtimeProfiles", "{}")); } catch {}
+      let previous = String(pref("activeRuntimeProfile", ""));
+      if (!previous) {
+        // Preserve old Linux settings before Windows installation replaces them.
+        const node = String(pref("runtimeNodePath", ""));
+        previous = Zotero.isWin && node.startsWith("/") ? "wsl:" + String(pref("wslDistro", "Ubuntu")) : key;
+      }
+      if (previous !== key) {
+        profiles[previous] = Object.fromEntries(fields.map(name => [name, pref(name, "")]));
+        const defaults = { runtimeEndpoint: key === "windows" ? "http://127.0.0.1:24119" : "http://127.0.0.1:24139", runtimeNodePath: key === "windows" ? "" : "node",
+          opencodePlatform: "auto", codexPlatform: "auto", claudePlatform: "auto" };
+        const saved = profiles[key] || defaults;
+        for (const name of fields) setPref(name, saved[name] ?? "");
+        setPref("runtimeProfiles", JSON.stringify(profiles));
+        this._nativeRuntime = null; this._health = null;
+      }
+      setPref("activeRuntimeProfile", key);
+    },
+
     normalizePaths() {
       if (Zotero.isWin && pref("runtimeHost", "auto") !== "wsl") return;
       for (const name of ["runtimeScriptPath", "runtimeNodePath", "defaultWorkingDirectory", "opencodePath", "codexPath", "claudePath"]) {
+        const platformName = { opencodePath: "opencodePlatform", codexPath: "codexPlatform", claudePath: "claudePlatform" }[name];
+        if (platformName && pref(platformName, "auto") === "windows") continue;
         const current = String(pref(name, "")).trim();
         const normalized = windowsToWSLPath(current);
         if (current && current !== normalized) setPref(name, normalized);
@@ -103,6 +133,10 @@
         const response = await this.request("/v1/health?cwd=" + encodeURIComponent(cwd), {}, 1500);
         if (response.ok) {
           const health = await response.json();
+          this._health = health;
+          if ((health.platform || health.shell?.platform) !== this.desiredPlatform()) return "wrong-environment";
+          if (this.desiredPlatform() === "wsl" && health.wslDistro && health.wslDistro !== String(pref("wslDistro", "Ubuntu"))) return "wrong-environment";
+          if (Number(health.protocolVersion || 0) < 3) return "outdated";
           const incorrectHomeCase = health.cwdExists === false && cwd.toLowerCase() === health.defaultCwd?.toLowerCase();
           if ((!cwd || incorrectHomeCase || (Zotero.isWin && pref("runtimeHost", "auto") !== "wsl" && cwd.startsWith("/"))) && health.defaultCwd && (/^[a-z]:[\\/]/i.test(health.defaultCwd) || health.defaultCwd.startsWith("/"))) {
             setPref("defaultWorkingDirectory", health.defaultCwd);
@@ -138,6 +172,8 @@
         executable.initWithPath(this._nativeRuntime.node);
         const child = Components.classes["@mozilla.org/process/util;1"].createInstance(Components.interfaces.nsIProcess);
         child.init(executable);
+        child.startHidden = true;
+        child.noShell = true;
         const args = [this._nativeRuntime.script, "--host", "127.0.0.1", "--port", String(port), "--token", this.token()];
         this._launchProcess = child;
         runtimeProcesses.add(child);
@@ -186,6 +222,8 @@
       const process = Components.classes["@mozilla.org/process/util;1"]
         .createInstance(Components.interfaces.nsIProcess);
       process.init(executable);
+      process.startHidden = true;
+      process.noShell = true;
       // Pass literal argv directly, as in the known-good September 10 launcher.
       const args = [
         "-d", distro, "--exec", "/usr/bin/env",
@@ -210,6 +248,7 @@
 
     async ensureRunning(force = false) {
       if (this._pending) return this._pending;
+      this.selectRuntimeProfile();
       this._pending = this._ensureRunning(force).then(async (state) => {
         if (state.status !== "disabled") await new RuntimeClient(null).syncAgentPaths();
         return state;
@@ -221,6 +260,29 @@
     async _ensureRunning(force = false) {
       const current = await this.probe();
       if (current === "running") return { status: "running" };
+      if (["wrong-environment", "outdated"].includes(current)) {
+        // Keep the existing service alive. Use a distinct authenticated endpoint
+        // for the requested host/new protocol; never silently reuse the old one.
+        const initial = this.endpoint();
+        if (!/^http:\/\/(?:127\.0\.0\.1|localhost):(?:24119|24129|24139|241(?:49|5[0-3]|59|6[0-3]))$/.test(initial)) {
+          throw new Error("自定义 Endpoint 上的 Runtime 环境或协议不匹配，请更新对应 Runtime 或修改 Endpoint；未自动更改自定义地址");
+        }
+        const base = this.desiredPlatform() === "windows" ? 24149 : 24159;
+        try {
+          for (let index = 0; index < 5; index++) {
+            this._connectingEndpoint = `http://127.0.0.1:${base + index}`;
+            if (this._connectingEndpoint === initial) continue;
+            const status = await this.probe();
+            if (status === "running") { setPref("runtimeEndpoint", this._connectingEndpoint); return { status: "running" }; }
+            if (status !== "offline") continue;
+            if (!force && !pref("autoStartRuntime", true)) throw new Error("当前端口运行的是其他环境或旧版 Runtime；请点击立即启动以连接所选环境");
+            const state = await this._startAndWait();
+            setPref("runtimeEndpoint", this._connectingEndpoint);
+            return state;
+          }
+          throw new Error("没有可用的独立 Runtime 端口，请配置空闲的本机端口");
+        } finally { this._connectingEndpoint = null; }
+      }
       if (current === "unauthorized") {
         throw new Error("端口上已有 Runtime，但 Token 不匹配；请停止旧 Runtime 后重试");
       }
@@ -740,51 +802,34 @@
     }
 
     async syncAgentPaths() {
-      try {
-        const executables = {};
-        const platforms = {};
-        const opencode = String(pref("opencodePath", "")).trim();
-        const codex = String(pref("codexPath", "")).trim();
-        const claude = String(pref("claudePath", "")).trim();
-        const nativeWindows = Zotero.isWin && pref("runtimeHost", "auto") !== "wsl";
-        const validPath = value => nativeWindows ? /^[a-z]:[\\/]/i.test(value) : value.startsWith("/");
-        if (opencode && validPath(opencode)) executables.opencode = opencode;
-        if (codex && validPath(codex)) executables.codex = codex;
-        if (claude && validPath(claude)) executables["claude-code"] = claude;
-        const opP = String(pref("opencodePlatform", "auto"));
-        const cxP = String(pref("codexPlatform", "auto"));
-        const clP = String(pref("claudePlatform", "auto"));
-        if (!nativeWindows && (opP === "wsl" || opP === "windows")) platforms.opencode = opP;
-        if (!nativeWindows && (cxP === "wsl" || cxP === "windows")) platforms.codex = cxP;
-        if (!nativeWindows && (clP === "wsl" || clP === "windows")) platforms["claude-code"] = clP;
-        if (!Object.keys(executables).length && !Object.keys(platforms).length) {
-          // skip POST, go straight to fetching detected paths
-        } else {
-          const response = await RuntimeManager.request("/v1/config/agents", {
-            method: "POST",
-            body: JSON.stringify({ executables, platforms }),
-          }, 5000);
-          if (!response.ok) {
-            Zotero.debug(`[ZotAgent] syncAgentPaths failed: ${response.status}`);
-          }
-        }
-      } catch (error) {
-        Zotero.debug(`[ZotAgent] syncAgentPaths error: ${error.message}`);
+      const executables = {}, platforms = {};
+      const definitions = { opencode: ["opencodePath", "opencodePlatform"], codex: ["codexPath", "codexPlatform"], "claude-code": ["claudePath", "claudePlatform"] };
+      const hostPlatform = RuntimeManager._health?.platform || RuntimeManager.desiredPlatform();
+      for (const [agent, [pathPref, platformPref]] of Object.entries(definitions)) {
+        const selection = String(pref(platformPref, "auto"));
+        platforms[agent] = ["windows", "wsl"].includes(selection) ? selection : "auto";
+        const actual = platforms[agent] === "auto" ? hostPlatform : platforms[agent];
+        const value = String(pref(pathPref, "")).trim();
+        const matches = actual === "windows" ? /^(?:[a-z]:[\\/]|\\\\(?!wsl[.$]))/i.test(value) : value.startsWith("/");
+        executables[agent] = matches ? value : "";
+        // Remove misleading paths even when version detection subsequently fails.
+        if (value && !matches) setPref(pathPref, "");
       }
+      const response = await RuntimeManager.request("/v1/config/agents", {
+        method: "POST", body: JSON.stringify({ executables, platforms, wslDistro: String(pref("wslDistro", "Ubuntu")) }),
+      }, 5000);
+      if (!response.ok) throw new Error(`Agent 配置失败: Runtime ${response.status}`);
       try {
-        const agentsRes = await RuntimeManager.request("/v1/agents");
+        const agentsRes = await RuntimeManager.request("/v1/agents", {}, 22000);
         if (!agentsRes.ok) throw new Error(`Runtime ${agentsRes.status}`);
-        if (agentsRes.ok) {
-          const agents = await agentsRes.json();
-          if (this.dialog) this.dialog._agentCapabilities = agents;
-          const prefMap = { opencode: "opencodePath", codex: "codexPath", "claude-code": "claudePath" };
-          for (const [name, info] of Object.entries(agents)) {
-            if (!info.available || !info.executable || !prefMap[name]) continue;
-            const current = String(pref(prefMap[name], "")).trim();
-            if (!current || (Zotero.isWin && pref("runtimeHost", "auto") !== "wsl" ? !/^[a-z]:[\\/]/i.test(current) : !current.startsWith("/"))) {
-              setPref(prefMap[name], info.executable);
-            }
-          }
+        const agents = await agentsRes.json();
+        if (this.dialog) this.dialog._agentCapabilities = agents;
+        RuntimeManager._agents = agents;
+        for (const [agent, info] of Object.entries(agents)) {
+          if (!definitions[agent]) continue;
+          const pathPref = definitions[agent][0];
+          const value = String(info.executable || "");
+          setPref(pathPref, value);
         }
       } catch (error) {
         throw new Error("Agent 自动检测失败: " + error.message);
@@ -821,7 +866,10 @@
           let event;
           try { event = JSON.parse(line); } catch { throw new Error("Runtime 返回了无效事件，回答可能不完整"); }
           if (event.requestID !== payload.requestID || event.windowID !== payload.windowID) return;
-          if (event.type === "error") failure = event.data?.message || event.data?.raw?.error?.message || event.data?.raw?.errors?.join("\n") || "Agent 返回错误";
+          if (event.type === "error") {
+            failure = event.data?.message || event.data?.raw?.error?.data?.message || event.data?.raw?.error?.message || event.data?.raw?.errors?.join("\n") || "Agent 返回错误";
+            event.data = { ...event.data, message: failure };
+          }
           if (event.type === "request.completed") completion = event;
           check(); onEvent(event);
         };
@@ -899,8 +947,11 @@
       const root = createElement(this.doc, "section", "zotagent-dialog");
       root.id = this.id;
       root.dataset.agent = this.agent;
-      root.style.left = `${40 + (dialogSequence % 5) * 34}px`;
-      root.style.top = `${72 + (dialogSequence % 4) * 28}px`;
+      const left = Math.min(40 + (dialogSequence % 5) * 34, Math.max(0, (this.win.innerWidth || 1024) - 480));
+      const top = Math.min(72 + (dialogSequence % 4) * 28, Math.max(0, (this.win.innerHeight || 800) - 700));
+      root.style.left = `${left}px`;
+      root.style.top = `${top}px`;
+      root.style.setProperty("--za-top", `${top}px`);
 
       const header = createElement(this.doc, "header", "zotagent-dialog-header");
       const title = createElement(this.doc, "strong", "zotagent-dialog-title", "ZotAgent");
@@ -942,7 +993,6 @@
       executionBar.append(this.cwdInput);
 
       this.contextBar = createElement(this.doc, "div", "zotagent-context-bar", "未绑定文献");
-      this.modelBar = createElement(this.doc, "div", "zotagent-model-bar", "模型：Agent 默认模型");
       this.selectionBox = createElement(this.doc, "div", "zotagent-selection-box");
       this.selectionLabel = createElement(this.doc, "div", "zotagent-selection-label", "PDF 选区");
       this.selectionInput = createElement(this.doc, "textarea", "zotagent-selection-input");
@@ -967,7 +1017,9 @@
       const captureBtn = createElement(this.doc, "button", "zotagent-small-button", "截图");
       captureBtn.title = "框选 PDF 区域截图";
       captureBtn.addEventListener("click", () => this.startAreaCapture());
-      this.selectionBox.append(this.selectionLabel, captureBtn, this.capturePreview, this.selectionInput, clearSelection);
+      const selectionHeader = createElement(this.doc, "div", "zotagent-selection-header");
+      selectionHeader.append(this.selectionLabel, captureBtn, clearSelection);
+      this.selectionBox.append(selectionHeader, this.capturePreview, this.selectionInput);
 
       this.refBar = createElement(this.doc, "div", "zotagent-ref-bar");
       this.fullTextCheckbox = createElement(this.doc, "input");
@@ -991,12 +1043,15 @@
 
       this.archiveBar = createElement(this.doc, "div", "zotagent-archive-bar");
       this.archiveLabel = createElement(this.doc, "span", "zotagent-archive-label", "本次不会自动归档");
-      const openArchive = createElement(this.doc, "button", "zotagent-small-button", "打开记忆笔记");
+      const openArchive = createElement(this.doc, "button", "zotagent-small-button", "打开");
       openArchive.addEventListener("click", () => this.archiveAction("open"));
-      const newArchive = createElement(this.doc, "button", "zotagent-small-button", "新建记忆笔记");
+      const newArchive = createElement(this.doc, "button", "zotagent-small-button", "新建");
       newArchive.addEventListener("click", () => this.archiveAction("new"));
-      const exportArchive = createElement(this.doc, "button", "zotagent-small-button", "导出 Markdown");
+      const exportArchive = createElement(this.doc, "button", "zotagent-small-button", "导出");
       exportArchive.addEventListener("click", () => this.archiveAction("export"));
+      openArchive.title = "打开当前记忆笔记";
+      newArchive.title = "新建记忆笔记；此前已提交的问题仍归档到旧笔记";
+      exportArchive.title = "导出 Markdown 和截图";
       this.archiveRetry = createElement(this.doc, "button", "zotagent-small-button", "重试归档");
       this.archiveRetry.addEventListener("click", () => this.archiveAction("retry"));
       this.archiveBar.append(this.archiveLabel, openArchive, newArchive, exportArchive, this.archiveRetry);
@@ -1045,16 +1100,12 @@
       history.addEventListener("click", () => this.showHistoryPanel());
       actions.append(copy, insert, save, history);
 
+      const contextDetails = createElement(this.doc, "div", "zotagent-context-details");
+      contextDetails.append(executionBar, this.contextBar, this.selectionBox, this.refBar, this.extraItemsList, this.fullTextStatus);
       root.append(
         header,
-        executionBar,
-        this.contextBar,
-        this.modelBar,
-        this.selectionBox,
-        this.refBar,
-        this.extraItemsList,
         this.archiveBar,
-        this.fullTextStatus,
+        contextDetails,
         this.messagesElement,
         this.ptyContainer,
         this.statusElement,
@@ -1072,7 +1123,9 @@
         const startY = event.clientY;
         const move = (moveEvent) => {
           root.style.left = `${Math.max(0, rect.left + moveEvent.clientX - startX)}px`;
-          root.style.top = `${Math.max(0, rect.top + moveEvent.clientY - startY)}px`;
+          const top = Math.max(0, Math.min(rect.top + moveEvent.clientY - startY, (this.win.innerHeight || 800) - 432));
+          root.style.top = `${top}px`;
+          root.style.setProperty("--za-top", `${top}px`);
         };
         const stop = () => {
           this.win.removeEventListener("pointermove", move);
@@ -1128,7 +1181,8 @@
       if (target) { try { title = archive.resolve(target).getNoteTitle(); } catch { title = "原笔记不可用，请新建"; } }
       const failed = [...(archive?.pending.values() || [])].filter(e => e.record.primaryDocument.key === document.key && e.record.primaryDocument.libraryID === document.libraryID).length;
       this.archiveRetry.hidden = !failed;
-      this.archiveLabel.textContent = `记忆笔记：${title}${message ? " · " + message : failed ? ` · ${failed} 条待归档，可重试` : ""}`;
+      this.archiveLabel.textContent = `记忆：${title}${message ? " · " + message : failed ? ` · ${failed} 条待归档，可重试` : ""}`;
+      this.archiveLabel.title = this.archiveLabel.textContent;
     }
 
     async archiveAction(action) {
@@ -1651,7 +1705,6 @@
 
     updateModelLabel(model) {
       this.currentModel = model || null;
-      if (this.modelBar) this.modelBar.textContent = model ? `模型：${model}` : "模型：Agent 默认模型";
     }
 
     showApprovalUI(event) {
@@ -2149,6 +2202,12 @@
         this._ptyID = data.ptyID;
         this.ptyInput.style.display = "none";
         this._terminal.focus();
+        if (this.win.ResizeObserver) {
+          this._terminalResizeObserver?.disconnect();
+          this._terminalResizeObserver = new this.win.ResizeObserver(() => this.fitTerminal());
+          this._terminalResizeObserver.observe(this.ptyOutput);
+        }
+        this.fitTerminal();
         const label = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" }[this.agent] || this.agent;
         this.renderStatus(`${label} 原生终端已连接`);
         this.streamPtyOutput();
@@ -2204,7 +2263,25 @@
       }).catch(() => {});
     }
 
+    fitTerminal() {
+      const terminal = this._terminal;
+      if (!terminal || !this._ptyID || !this._ptyMode) return;
+      const screen = terminal.element?.querySelector(".xterm-screen")?.getBoundingClientRect();
+      if (!screen?.width || !screen.height) return;
+      const style = this.win.getComputedStyle(this.ptyOutput);
+      const width = this.ptyOutput.clientWidth - parseFloat(style.paddingLeft || 0) - parseFloat(style.paddingRight || 0);
+      const height = this.ptyOutput.clientHeight - parseFloat(style.paddingTop || 0) - parseFloat(style.paddingBottom || 0);
+      if (width <= 0 || height <= 0) return;
+      const cols = Math.max(2, Math.floor(width / (screen.width / terminal.cols)));
+      const rows = Math.max(1, Math.floor(height / (screen.height / terminal.rows)));
+      if (cols === terminal.cols && rows === terminal.rows) return;
+      terminal.resize(cols, rows);
+      fetch(this.runtime.endpoint("/v1/pty/resize"), { method: "POST", headers: this.runtime.headers(),
+        body: JSON.stringify({ ptyID: this._ptyID, cols, rows }) }).catch(() => {});
+    }
+
     async closePty() {
+      this._terminalResizeObserver?.disconnect();
       if (this._ptyID) {
         try {
           await fetch(this.runtime.endpoint("/v1/pty/close"), {
@@ -2225,6 +2302,7 @@
       this._destroyed = true;
       this._archiveUnsubscribe?.();
       this._captureCleanup?.();
+      this._terminalResizeObserver?.disconnect();
       if (this._ptyID) this.closePty();
       this.element.remove();
       this.controller.dialogs.delete(this.id);
@@ -2590,6 +2668,7 @@
   const hooks = {
     async onStartup() {
       await Zotero.uiReadyPromise;
+      if (shuttingDown) return;
       preferencePaneID = Zotero.PreferencePanes.register({
         pluginID: PLUGIN_ID,
         src: "chrome://zotagent/content/preferences.xhtml",
@@ -2616,6 +2695,7 @@
     },
 
     async onShutdown() {
+      shuttingDown = true;
       for (const controller of controllers.values()) controller.destroy();
       controllers.clear();
       await Zotero.ZotAgent.archive?.drain();

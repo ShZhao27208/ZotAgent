@@ -20,11 +20,35 @@
     archiveNameTimezone: ["时区", "local", [["local", "系统本地"], ["Asia/Shanghai", "Asia/Shanghai"], ["UTC", "UTC"]]],
     archiveNameTitleLength: ["标题长度", "60", [["20", "20 字符"], ["40", "40 字符"], ["60", "60 字符"], ["100", "100 字符"], ["0", "不限制"]]],
   };
+  const namingTokens = {
+    title: "文献标题", shortTitle: "短标题", tags: "标签", author: "第一作者", authors: "全部作者",
+    year: "发表年份", doi: "DOI", key: "条目 key", date: "创建日期", time: "创建时间",
+    weekday: "星期", sequence: "笔记序号", YYYY: "创建年", MM: "创建月", DD: "创建日",
+    HH: "创建时", mm: "创建分", ss: "创建秒",
+  };
+  const visibleChoices = Object.fromEntries(Object.entries(choices).filter(([name]) =>
+    ["archiveSort", "archiveNameDate", "archiveNameTime", "archiveNameTimezone", "archiveNameTitleLength", "archiveNameSequence"].includes(name)));
+  visibleChoices.archiveNameSequence = ["序号格式", "collision", [["collision", "不补零"], ["2", "两位补零"], ["3", "三位补零"]]];
   const escape = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   function settings() {
     const result = {};
     for (const [name, [, fallback]] of Object.entries(choices)) result[name] = Zotero.Prefs.get("extensions.zotagent." + name, true) ?? fallback;
     result.archiveNameCustomPrefix = Zotero.Prefs.get("extensions.zotagent.archiveNameCustomPrefix", true) || "";
+    result.archiveNameTemplate = Zotero.Prefs.get("extensions.zotagent.archiveNameTemplate", true);
+    if (result.archiveNameTemplate == null) {
+      const migrated = resolveLegacyPreset(result);
+      const sep = migrated.archiveNameSeparator;
+      const date = [migrated.archiveNameDate && "{date}", migrated.archiveNameTime && "{time}", migrated.archiveNameWeekday && "{weekday}"].filter(Boolean).join(sep);
+      const doc = migrated.archiveNameDocument === "authorYear" ? "{author} {year}" : migrated.archiveNameDocument ? `{${migrated.archiveNameDocument}}` : "";
+      const prefix = migrated.archiveNamePrefix === "custom" ? migrated.archiveNameCustomPrefix.trim() : migrated.archiveNamePrefix;
+      const number = migrated.archiveNameSequence === "collision" ? "" : "{sequence}";
+      const fields = migrated.archiveNameOrder === "sequenceFirst" ? [prefix, doc, number, date] : migrated.archiveNameOrder === "dateFirst" ? [prefix, date, doc, number] : [prefix, doc, date, number];
+      result.archiveNameTemplate = fields.filter(Boolean).join(sep) || "ZotAgent 对话记录";
+      for (const name of ["archiveNameDate", "archiveNameTime", "archiveNameSequence"]) result[name] = migrated[name];
+      if (result.archiveNameSequence === "always") result.archiveNameSequence = "collision";
+      for (const name of ["archiveNameTemplate", "archiveNameDate", "archiveNameTime", "archiveNameSequence"])
+        Zotero.Prefs.set("extensions.zotagent." + name, result[name], true);
+    }
     return result;
   }
   function documentSnapshot(item) {
@@ -32,15 +56,17 @@
     const field = name => { try { return String(item.getField(name) || ""); } catch { return ""; } };
     let creators = [];
     try { creators = item.getCreators().map(c => c.lastName || c.name).filter(Boolean); } catch {}
+    let tags = [];
+    try { tags = item.getTags().map(t => t.tag).filter(Boolean); } catch {}
     let link = "";
     try {
       const group = Zotero.Libraries.get(item.libraryID)?.libraryType === "group" ? Zotero.Groups.getGroupIDFromLibraryID(item.libraryID) : null;
       link = `zotero://select/${group ? `groups/${group}` : "library"}/items/${item.key}`;
     } catch { link = `zotero://select/library/items/${item.key}`; }
     return { id: item.id, libraryID: item.libraryID, key: item.key, title: field("title") || "未命名文献", shortTitle: field("shortTitle"),
-      author: creators[0] || "", authors: creators.join(", "), year: field("date").match(/\d{4}/)?.[0] || "", doi: field("DOI"), link };
+      tags: tags.join(", "), author: creators[0] || "", authors: creators.join(", "), year: field("date").match(/\d{4}/)?.[0] || "", doi: field("DOI"), link };
   }
-  function noteName(document, at = new Date(), sequence = 1, config = settings()) {
+  function resolveLegacyPreset(config) {
     const c = { ...config };
     const presets = {
       chinese: ["YYYY年MM月DD日", "HH时mm分"], chineseSeconds: ["YYYY年MM月DD日", "HH时mm分ss秒"],
@@ -54,24 +80,21 @@
         archiveNameOrder: doc ? "documentFirst" : "dateFirst", archiveNameSeparator: /^(chinese|compact)/.test(c.archiveNamePreset) ? "" : " " });
       if (c.archiveNamePreset === "sequence") c.archiveNameSequence = "always";
     }
+    return c;
+  }
+  function noteName(document, at = new Date(), sequence = 1, c = settings()) {
     const timeZone = c.archiveNameTimezone === "local" ? undefined : c.archiveNameTimezone;
     const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(at).map(p => [p.type, p.value]));
-    const tokens = { YYYY: parts.year, MM: parts.month, DD: parts.day, HH: parts.hour, mm: parts.minute, ss: parts.second };
-    const format = value => String(value || "").replace(/YYYY|MM|DD|HH|mm|ss/g, t => tokens[t]);
-    const sep = c.archiveNameSeparator;
-    let docText = c.archiveNameDocument === "authorYear" ? [document?.author, document?.year].filter(Boolean).join(" ") : document?.[c.archiveNameDocument] || "";
-    if (c.archiveNameDocument === "shortTitle") docText ||= document?.title || "";
-    if (["title", "shortTitle"].includes(c.archiveNameDocument) && Number(c.archiveNameTitleLength)) docText = Array.from(docText).slice(0, Number(c.archiveNameTitleLength)).join("");
-    let week = "";
-    if (c.archiveNameWeekday) {
-      const weekday = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short" }).format(at);
-      week = c.archiveNameWeekday === "english" ? weekday : c.archiveNameWeekday + "日一二三四五六"[["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(weekday)];
-    }
-    const date = [format(c.archiveNameDate), format(c.archiveNameTime), week].filter(Boolean).join(sep);
-    const prefix = c.archiveNamePrefix === "custom" ? c.archiveNameCustomPrefix.trim() : c.archiveNamePrefix;
-    const number = c.archiveNameSequence === "collision" ? "" : String(sequence).padStart(Number(c.archiveNameSequence) || 1, "0");
-    const fields = c.archiveNameOrder === "sequenceFirst" ? [prefix, docText, number, date] : c.archiveNameOrder === "dateFirst" ? [prefix, date, docText, number] : [prefix, docText, date, number];
-    return fields.filter(Boolean).join(sep).trim() || "ZotAgent 对话记录";
+    const clock = { YYYY: parts.year, MM: parts.month, DD: parts.day, HH: parts.hour, mm: parts.minute, ss: parts.second };
+    const format = value => String(value || "").replace(/YYYY|MM|DD|HH|mm|ss/g, t => clock[t]);
+    const limit = value => Number(c.archiveNameTitleLength) ? Array.from(String(value || "")).slice(0, Number(c.archiveNameTitleLength)).join("") : String(value || "");
+    const values = { ...document, ...clock, title: limit(document?.title), shortTitle: limit(document?.shortTitle || document?.title),
+      date: format(c.archiveNameDate), time: format(c.archiveNameTime),
+      weekday: new Intl.DateTimeFormat("zh-CN", { timeZone, weekday: "long" }).format(at),
+      sequence: String(sequence).padStart(Number(c.archiveNameSequence) || 1, "0"),
+    };
+    return String(c.archiveNameTemplate ?? "{date}{time}").replace(/\{([A-Za-z]+)\}/g, (token, key) =>
+      Object.hasOwn(namingTokens, key) ? String(values[key] ?? "") : token).trim() || "ZotAgent 对话记录";
   }
   function fullTextDescription(entry) {
     if (entry.state === "extracting") return "全文提取未完成，未提交。";
@@ -100,7 +123,7 @@
       + (record.failureSummary ? `<p>说明：${escape(record.failureSummary)}</p>` : "")
       + `<h6 id="zotagent-end-${escape(record.id)}">记录结束</h6>`;
   }
-  function noteBody(doc) { return doc.body.querySelector(":scope > div[data-schema-version]") || doc.body; }
+  function noteBody(doc) { return doc.body.querySelector(":scope > div[data-schema-version], :scope > div.zotero-note") || doc.body; }
   function recordsIn(doc) {
     const body = noteBody(doc), found = [], ids = new Set();
     let active = null;
@@ -130,5 +153,5 @@
     slots.forEach((slot, i) => { slot.before(...sorted[i].nodes); slot.remove(); });
     return doc.body.innerHTML;
   }
-  Zotero.ZotAgent.archiveFormat = { AGENTS, choices, settings, escape, documentSnapshot, noteName, fullTextDescription, renderRecord, recordsIn, noteBody, sortRecords, labels };
+  Zotero.ZotAgent.archiveFormat = { AGENTS, choices: visibleChoices, namingTokens, settings, escape, documentSnapshot, noteName, fullTextDescription, renderRecord, recordsIn, noteBody, sortRecords, labels };
 })();

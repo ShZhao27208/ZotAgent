@@ -170,7 +170,7 @@
 
   <groupbox>
     <label><html:h2>Runtime</html:h2></label>
-    <html:p class="zotagent-help">插件会在首次启动时生成安全 Token。Windows 默认自动部署内置 Runtime、填写本机路径并使用已有 Node.js 启动；仅手动选择 WSL 时使用 WSL。</html:p>
+    <html:p class="zotagent-help">插件会在首次启动时生成安全 Token。Windows 默认自动部署内置 Runtime、填写本机路径并使用已有 Node.js 启动；Agent 可分别选择 Windows 或 WSL；Windows 后端通过 wsl.exe 调用所选发行版内的 Agent。后端整体切换为 WSL 时需配置该环境的 Runtime 源码和 Node。</html:p>
     <checkbox
       id="zotagent-auto-start-runtime"
       label="启动 Zotero 时自动启动并连接 Runtime"
@@ -179,7 +179,7 @@
     <html:div class="zotagent-pref-grid">
       <html:label for="zotagent-runtime-host">后端启动位置</html:label>
       <html:select id="zotagent-runtime-host" data-pref="runtimeHost">
-        <html:option value="auto">自动（Windows 原生，无需 WSL）</html:option>
+        <html:option value="auto">自动（Windows 使用本机后端）</html:option>
         <html:option value="wsl">WSL（手动高级配置）</html:option>
       </html:select>
       <html:label for="zotagent-runtime-endpoint">Endpoint</html:label>
@@ -196,7 +196,7 @@
       <html:input id="zotagent-working-directory" data-pref="defaultWorkingDirectory" />
     </html:div>
     <hbox class="zotagent-actions">
-      <button id="zotagent-start-runtime" label="立即启动" />
+      <button id="zotagent-start-runtime" label="连接并检测" />
       <button id="zotagent-test-runtime" label="检测连接" />
     </hbox>
     <html:pre id="zotagent-runtime-result"></html:pre>
@@ -214,7 +214,7 @@
         <html:option value="windows">Windows</html:option>
       </html:select>
       <html:label for="zotagent-opencode-model">OpenCode 临时模型（可选）</html:label>
-      <html:input id="zotagent-opencode-model" data-pref="opencodeModel" placeholder="留空使用 Agent 默认模型" />
+      <html:input id="zotagent-opencode-model" data-pref="opencodeModel" placeholder="例如 opencode/mimo-v2.6-flash-free；留空使用 CLI 配置" />
       <html:label for="zotagent-codex-path">Codex CLI</html:label>
       <html:input id="zotagent-codex-path" data-pref="codexPath" />
       <html:label for="zotagent-codex-platform">Codex 运行环境</html:label>
@@ -238,7 +238,7 @@
         <html:option value="claude-code">Claude Code</html:option>
       </html:select>
     </html:div>
-    <html:p style="margin:4px 0 0;font-size:11px;color:#666;">默认自动检测当前运行环境；只有检测失败时才需要填写路径。模型留空时沿用 Agent 自己的默认配置。</html:p>
+    <html:p style="margin:4px 0 0;font-size:11px;color:#666;">自动选项跟随后端环境；选择 WSL 会在上方指定的发行版内检测和执行。切换环境后路径重新检测。模型留空时沿用 Agent 自己的默认配置。</html:p>
     <hbox style="margin-top:8px;gap:6px;">
       <button id="zotagent-test-opencode" label="测试 OpenCode" />
       <button id="zotagent-test-codex" label="测试 Codex" />
@@ -270,6 +270,7 @@
     <label><html:h2>对话历史归档</html:h2></label>
     <html:p class="zotagent-help">同一主文献的三个 Agent 和多个窗口共用记忆笔记。仅在完成、失败或中断时归档；不调用模型，不保存思考过程或 PDF 全文。手动“保存子笔记”用于单独收藏回答。</html:p>
     <html:div id="zotagent-archive-settings" class="zotagent-pref-grid"></html:div>
+    <html:p class="zotagent-help">自由输入模板并从下拉菜单插入字段，例如 {title}_ {tags}_ {author}_ {date}。{date} 为创建日期，{time} 为创建时间，{year} 为文献发表年份；缺失字段留空，分隔符按输入保留。{sequence} 的补零由序号选项控制；重名仍自动追加编号。</html:p>
     <html:p id="zotagent-archive-name-preview" class="zotagent-help"></html:p>
     <html:p id="zotagent-archive-settings-status" class="zotagent-help"></html:p>
     <html:p class="zotagent-help">命名设置仅影响新笔记；更改排序会重排当前归档笔记，保留已有正文。全文不主动截断，仍受请求体大小、CLI 和模型上下文限制。</html:p>

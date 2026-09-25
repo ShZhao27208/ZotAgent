@@ -93,3 +93,20 @@ test('client preserves stderr details for unsuccessful completion',async()=>{
   f.context.fetch=async()=>({ok:true,body:{getReader:()=>{let done=false;return {read:async()=>done?{done:true}:(done=true,{done:false,value:new TextEncoder().encode(JSON.stringify(event)+'\n')})};}}});
   const result=await client.run({requestID:'r',windowID:'w'},()=>{});assert.equal(result.status,'failed');assert.match(result.error,/quota exhausted/);
 });
+
+test('nested CLI error remains failure even after exit zero and reaches the UI callback',async()=>{
+  const f=fixture(),client=new f.api.RuntimeClient(null);f.api.RuntimeManager.ensureRunning=async()=>{};client.syncAgentPaths=async()=>{};
+  const events=[{type:'error',requestID:'r',windowID:'w',data:{raw:{error:{data:{message:'Model unavailable'}}}}},{type:'request.completed',requestID:'r',windowID:'w',data:{code:0}}];
+  let first=true;
+  f.context.fetch=async()=>({ok:true,body:{getReader:()=>({read:async()=>first?(first=false,{value:new TextEncoder().encode(events.map(e=>JSON.stringify(e)).join('\n')),done:false}):{done:true}})}});
+  const received=[];const result=await client.run({requestID:'r',windowID:'w'},e=>received.push(e));
+  assert.equal(result.status,'failed');assert.equal(result.error,'Model unavailable');
+  assert.equal(received[0].data.message,'Model unavailable');
+});
+test('selection clear still removes screenshot and text after archive toolbar restructuring',()=>{
+  const f=fixture(),dialog=f.dialog();dialog.capturedImage='data:image/png;base64,aGVsbG8=';dialog.capturePreview.style.display='';dialog.selectionInput.value='selected PDF text';
+  const clear=[...dialog.element.querySelectorAll('button')].find(b=>b.textContent==='清除');
+  clear.click();assert.equal(dialog.capturedImage,null);assert.equal(dialog.selectionInput.value,'');assert.equal(dialog.capturePreview.style.display,'none');
+  assert.equal(dialog.element.querySelector('.zotagent-model-bar'),null);
+  assert.ok(dialog.element.querySelector('.zotagent-context-details').contains(dialog.selectionBox));
+});

@@ -56,15 +56,40 @@ test('damaged record boundaries preserve user content and report an actionable e
   note.setNote(note.getNote().replace(/<h6[^>]*>记录结束<\/h6>/,''));const before=note.getNote();
   await assert.rejects(f.archive.save(f.record(p,'r2'),target),/结束标题/);assert.equal(note.getNote(),before);
 });
-test('name defaults, custom fields, timezone and missing metadata are deterministic',()=>{
-  const f=fixture();const settings=f.format.settings();settings.archiveNameTimezone='UTC';
-  assert.equal(f.format.noteName({},new Date('2026-09-25T01:02:03Z'),1,settings),'2026年09月25日01时02分');
-  Object.assign(settings,{archiveNamePreset:'custom',archiveNameDate:'YYYY-MM-DD',archiveNameTime:'',archiveNameDocument:'authorYear',archiveNameSeparator:'_',archiveNameOrder:'documentFirst',archiveNameSequence:'3'});
-  assert.equal(f.format.noteName({author:'张',year:'2025'},new Date('2026-09-25T01:02:03Z'),2,settings),'张 2025_2026-09-25_002');
-  for(const [preset] of f.format.choices.archiveNamePreset[2]) assert.doesNotMatch(f.format.noteName({},new Date(),1,{...settings,archiveNamePreset:preset}),/undefined|null/);
+test('custom naming expands metadata, date fields, missing tags and sequence without recursive expansion',async()=>{
+  const f=fixture(), settings={...f.format.settings(),archiveNameTimezone:'UTC'};
+  const at=new Date('2026-09-25T01:02:03Z');
+  assert.equal(f.format.noteName({},at,1,settings),'2026年09月25日01时02分');
+  Object.assign(settings,{archiveNameTemplate:'{title}_ {tags}_ {author}_ {date}_{sequence}',archiveNameDate:'YYYY-MM-DD',archiveNameSequence:'3'});
+  const p=await f.paper('Title {author}');p.getTags=()=>[{tag:'review'},{tag:'PDF'}];
+  assert.equal(f.format.noteName(f.format.documentSnapshot(p),at,2,settings),'Title {author}_ review, PDF_ Author_ 2026-09-25_002');
+  assert.equal(f.format.noteName({},at,2,settings),'_ _ _ 2026-09-25_002');
+  assert.equal(f.format.noteName({},at,1,{...settings,archiveNameTemplate:'{YYYY}/{MM}/{DD} {HH}:{mm}:{ss}'}),'2026/09/25 01:02:03');
+  assert.equal(f.format.noteName({},at,1,{...settings,archiveNameTemplate:'{unknown}'}),'{unknown}');
+});
+test('old naming presets migrate once and template edits win over legacy preferences',()=>{
+  const f=fixture();f.prefs.set('extensions.zotagent.archiveNamePreset','authorYear');
+  let settings=f.format.settings();settings.archiveNameTimezone='UTC';
+  assert.equal(settings.archiveNameTemplate,'{author} {year} {date} {time}');
+  assert.equal(f.format.noteName({author:'张',year:'2025'},new Date('2026-09-25T01:02:03Z'),1,settings),'张 2025 2026-09-25 01:02');
+  f.prefs.set('extensions.zotagent.archiveNameTemplate','自定义 {tags}');
+  assert.equal(f.format.settings().archiveNameTemplate,'自定义 {tags}');
+  assert.equal(f.format.choices.archiveNamePreset,undefined);
 });
 test('Markdown export reads edited DOM and preserves tables, code, links and image paths',()=>{
   const f=fixture();const doc=f.archive.parse('<h1>Edited title</h1><p>user edits <strong>bold</strong> <a href="https://example.com">link</a></p><pre><code>a\n\n\nb</code></pre><table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table><p><img alt="截图" src="note_images/one.png"></p>');
   const md=f.Zotero.ZotAgent.archiveExport.toMarkdown(doc);
   assert.match(md,/# Edited title/);assert.match(md,/\*\*bold\*\*/);assert.match(md,/\| 1 \| 2 \|/);assert.match(md,/a\n\n\nb/);assert.match(md,/!\[截图\]\(note_images\/one.png\)/);
+});
+
+test('native legacy note wrapper preserves old records, sorting, and idempotency', async () => {
+  const f=fixture(),p=await f.paper(),target=f.archive.targetFor(f.format.documentSnapshot(p));
+  await f.archive.save(f.record(p,'late',2,3),target);
+  const note=f.archive.resolve(await target);
+  note.setNote('<div class="zotero-note znv1">'+note.getNote()+'</div>');
+  await f.archive.save(f.record(p,'early',1,4),target);
+  await f.archive.save(f.record(p,'late',2,3),target);
+  assert.equal(f.format.recordsIn(f.archive.parse(note.getNote())).map(r=>r.meta.id).join(','),'early,late');
+  await f.archive.reorderCurrent('ended');
+  assert.equal(f.format.recordsIn(f.archive.parse(note.getNote())).map(r=>r.meta.id).join(','),'late,early');
 });

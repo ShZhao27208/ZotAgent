@@ -2,6 +2,15 @@ function firstString(...values) {
   return values.find((value) => typeof value === "string" && value.length);
 }
 
+export function extractError(raw) {
+  const error = raw?.error || raw?.properties?.error;
+  const data = error?.data;
+  const detail = firstString(data?.message, error?.message, typeof error === "string" ? error : null,
+    raw?.message, Array.isArray(raw?.errors) ? raw.errors.join("\n") : null, raw?.is_error ? raw?.result : null);
+  const model = data?.providerID && data?.modelID ? `${data.providerID}/${data.modelID}` : null;
+  return [error?.name, detail, model && `模型：${model}`].filter(Boolean).join(" · ") || "Agent 返回错误（未提供详细原因）";
+}
+
 export function extractModel(raw) {
   if (!raw || typeof raw !== "object") return null;
   return firstString(

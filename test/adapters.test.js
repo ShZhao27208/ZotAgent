@@ -20,7 +20,8 @@ test("OpenCode uses JSON events and explicit directory", () => {
   const invocation = adapters.opencode.buildInvocation(request);
   assert.equal(invocation.command, "/bin/opencode");
   assert.deepEqual(invocation.args.slice(0, 5), ["run", "--format", "json", "--dir", request.cwd]);
-  assert.equal(invocation.args.at(-1), request.prompt);
+  assert.equal(invocation.stdin, request.prompt);
+  assert.ok(!invocation.args.includes(request.prompt));
 });
 
 test("OpenCode leaves model selection to its native configuration by default", () => {
@@ -94,4 +95,12 @@ test('Claude transports screenshot bytes in a structured user message for fresh 
 });
 test('Claude rejects unsupported image types rather than claiming successful attachment',()=>{
   assert.throws(()=>adapters['claude-code'].buildInvocation({...request,image:'data:image/svg+xml;base64,aGVsbG8='}),/Unsupported image/);
+});
+
+test('OpenCode rejects display labels before spawning, accepts provider/model IDs and leaves empty defaults alone',()=>{
+  assert.throws(()=>adapters.opencode.buildInvocation({...request,model:'MiMo-V2.6-Flash Free/OpenCode Zen'}),/provider\/model ID/);
+  assert.throws(()=>adapters.opencode.buildInvocation({...request,model:'model-without-provider'}),/provider\/model ID/);
+  const invocation=adapters.opencode.buildInvocation({...request,model:'opencode/mimo-v2.6-flash-free'});
+  assert.equal(invocation.args[invocation.args.indexOf('--model')+1],'opencode/mimo-v2.6-flash-free');
+  assert.equal(adapters.opencode.buildInvocation({...request,model:'  '}).args.includes('--model'),false);
 });

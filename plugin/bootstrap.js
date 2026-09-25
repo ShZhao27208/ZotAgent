@@ -42,7 +42,9 @@ async function startup({ rootURI, version }) {
   Zotero.ZotAgent._rootURI = rootURI;
   Zotero.ZotAgent._version = version;
   Services.scriptloader.loadSubScript(rootURI + "content/runtime-installer.js", context);
-  await Zotero.ZotAgent.hooks.onStartup();
+  // Zotero may await bootstrap before finishing the item tree. Do not block
+  // plugin initialization on uiReadyPromise.
+  Zotero.ZotAgent.hooks.onStartup().catch(error => Zotero.logError(error));
 }
 
 async function onMainWindowLoad({ window }) {

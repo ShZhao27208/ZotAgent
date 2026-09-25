@@ -20,7 +20,7 @@ function fixture() {
       return { status: 200, response: url.endsWith('/v1/agents') ? {
         codex: { available: true, executable: '/opt/codex' },
         'claude-code': { available: true, executable: '/opt/claude' },
-      } : { defaultCwd: '/home/runtime-user', cwdExists: false } };
+      } : { platform: 'wsl', protocolVersion: 3, defaultCwd: '/home/runtime-user', cwdExists: false } };
     } } },
     Components: { interfaces: {}, classes: {
       '@mozilla.org/file/local;1': { createInstance: () => ({ initWithPath() {}, exists: () => true }) },
@@ -117,7 +117,7 @@ test('failed CLI detection rejects and releases pending connection for retry', a
   const { manager, sandbox } = fixture();
   sandbox.Zotero.HTTP.request = async (_method, url) => {
     if (url.endsWith('/v1/agents')) throw new Error('timeout');
-    return { status: 200, response: { defaultCwd: '/home/runtime-user' } };
+    return { status: 200, response: { platform: 'wsl', protocolVersion: 3, defaultCwd: '/home/runtime-user' } };
   };
   await assert.rejects(manager.ensureRunning(), /Agent 自动检测失败: timeout/);
   assert.equal(manager._pending, null);
@@ -129,7 +129,7 @@ test('incorrect home directory casing is repaired only when runtime confirms it 
   await manager.probe();
   assert.equal(prefs.get('defaultWorkingDirectory'), '/home/runtime-user');
   prefs.set('defaultWorkingDirectory', '/home/Runtime-User');
-  sandbox.Zotero.HTTP.request = async () => ({ status: 200, response: { defaultCwd: '/home/runtime-user', cwdExists: true } });
+  sandbox.Zotero.HTTP.request = async () => ({ status: 200, response: { platform: 'wsl', protocolVersion: 3, defaultCwd: '/home/runtime-user', cwdExists: true } });
   await manager.probe();
   assert.equal(prefs.get('defaultWorkingDirectory'), '/home/Runtime-User');
 });

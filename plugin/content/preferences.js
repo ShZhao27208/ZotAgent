@@ -59,10 +59,18 @@
 
   function refreshDetectedFields(doc) {
     for (const element of doc.querySelectorAll("[data-pref]")) {
-      if (!isCheckbox(element) && !isSelect(element) && doc.activeElement !== element) {
+      if (!isCheckbox(element) && doc.activeElement !== element) {
         element.value = get(element.dataset.pref) ?? "";
       }
     }
+  }
+
+  function runtimeStatus() {
+    const manager = Zotero.ZotAgent.runtimeManager, health = manager._health || {};
+    const endpoint = manager.endpoint();
+    const port = endpoint.match(/:(\d+)(?:\/|$)/)?.[1] || (endpoint.startsWith("https:") ? "443" : "80");
+    const host = health.platform === "windows" ? "Windows" : health.wslDistro ? `WSL · ${health.wslDistro}` : health.platform || "未知";
+    return `Runtime 已连接 · ${host} · 监听端口 ${port}${health.pid ? ` · PID ${health.pid}` : ""}\n${endpoint}`;
   }
 
   function load(win) {
@@ -72,6 +80,26 @@
     if (archiveSettings) {
       archiveSettings.replaceChildren();
       const make = tag => doc.createElementNS("http://www.w3.org/1999/xhtml", tag);
+      const naming = format.settings();
+      const templateLabel = make("label"); templateLabel.textContent = "命名模板"; templateLabel.htmlFor = "zotagent-archive-template";
+      const template = make("input"); template.id = templateLabel.htmlFor; template.dataset.pref = "archiveNameTemplate";
+      template.placeholder = "{title}_ {tags}_ {author}_ {date}";
+      template.value = naming.archiveNameTemplate;
+      const tokenLabel = make("label"); tokenLabel.textContent = "插入字段"; tokenLabel.htmlFor = "zotagent-archive-token";
+      const picker = make("select"); picker.id = tokenLabel.htmlFor;
+      const hint = make("option"); hint.value = ""; hint.textContent = "选择字段，在光标处插入…"; picker.append(hint);
+      for (const [token, label] of Object.entries(format.namingTokens)) {
+        const option = make("option"); option.value = `{${token}}`; option.textContent = `{${token}} · ${label}`; picker.append(option);
+      }
+      picker.addEventListener("change", () => {
+        if (!picker.value) return;
+        const start = template.selectionStart ?? template.value.length, end = template.selectionEnd ?? start;
+        const token = picker.value;
+        template.value = template.value.slice(0, start) + token + template.value.slice(end);
+        set("archiveNameTemplate", template.value); picker.value = "";
+        template.focus(); template.setSelectionRange(start + token.length, start + token.length); preview();
+      });
+      archiveSettings.append(templateLabel, template, tokenLabel, picker);
       for (const [name, [label, fallback, choices]] of Object.entries(format.choices)) {
         const title = make("label"); title.textContent = label; title.htmlFor = "zotagent-" + name;
         const select = make("select"); select.id = title.htmlFor; select.dataset.pref = name;
@@ -82,14 +110,12 @@
         if (get(name) === undefined) set(name, fallback);
         archiveSettings.append(title, select);
       }
-      const label = make("label"); label.textContent = "自定义前缀"; label.htmlFor = "zotagent-archive-custom-prefix";
-      const input = make("input"); input.id = label.htmlFor; input.dataset.pref = "archiveNameCustomPrefix";
-      archiveSettings.append(label, input);
     }
     const preview = () => {
       const element = doc.querySelector("#zotagent-archive-name-preview");
-      if (element) element.textContent = "名称预览：" + format.noteName({ title: "示例研究文献", shortTitle: "示例文献", author: "张", year: "2026", doi: "10.example/demo", key: "ABCD1234" });
+      if (element) element.textContent = "名称预览：" + format.noteName({ title: "示例研究文献", shortTitle: "示例文献", tags: "综述, 待读", author: "张", authors: "张, 李", year: "2026", doi: "10.example/demo", key: "ABCD1234" });
     };
+    Zotero.ZotAgent.runtimeManager.selectRuntimeProfile();
     Zotero.ZotAgent.runtimeManager.normalizePaths();
     for (const element of doc.querySelectorAll("[data-pref]")) {
       const name = element.dataset.pref;
@@ -109,7 +135,32 @@
       }
 
       element.addEventListener("change", () => {
+        const previous = get(name);
+        const environmentChange = ["runtimeHost", "wslDistro", "opencodePlatform", "codexPlatform", "claudePlatform"].includes(name);
+        if (environmentChange) {
+          const busy = Zotero.ZotAgent.runtimeManager._pending || [...Zotero.ZotAgent.controllers.values()].some(controller => [...controller.dialogs.values()].some(dialog => dialog._activeBatch || dialog._ptyID));
+          if (busy) {
+            element.value = previous;
+            doc.querySelector("#zotagent-runtime-result").textContent = "请等待连接完成，或先停止当前回答并关闭原生终端，再切换运行环境。";
+            return;
+          }
+        }
         set(name, isCheckbox(element) ? element.checked : element.value);
+        if (environmentChange) {
+          const pathPref = { opencodePlatform: "opencodePath", codexPlatform: "codexPath", claudePlatform: "claudePath" }[name];
+          if (pathPref) set(pathPref, "");
+          const changedAgent = { opencodePlatform: "opencode", codexPlatform: "codex", claudePlatform: "claude-code" }[name];
+          for (const controller of Zotero.ZotAgent.controllers.values()) {
+            for (const dialog of controller.dialogs.values()) {
+              // Native session IDs belong to the selected installation.
+              if (changedAgent) dialog.sessions[changedAgent] = null;
+              else dialog.sessions = Object.create(null);
+            }
+          }
+          if (name === "runtimeHost" || name === "wslDistro") Zotero.ZotAgent.runtimeManager.selectRuntimeProfile();
+          refreshDetectedFields(doc);
+          doc.querySelector("#zotagent-runtime-result").textContent = "运行环境已保存。点击“连接并检测”以检测所选环境的 Agent；下一次发送也会应用此设置。";
+        }
         if (name === "archiveSort") {
           const status = doc.querySelector("#zotagent-archive-settings-status");
           status.textContent = "正在重排当前归档笔记...";
@@ -118,7 +169,7 @@
         }
         if (name.startsWith("archiveName")) preview();
       });
-      if (!isSelect(element) && !isCheckbox(element)) {
+      if (!isSelect(element) && !isCheckbox(element) && name !== "wslDistro") {
         element.addEventListener("input", () => { set(name, element.value); if (name.startsWith("archiveName")) preview(); });
       }
     }
@@ -130,7 +181,7 @@
       refreshDetectedFields(doc);
       if (status) status.textContent = state.status === "disabled"
         ? "Runtime 自动启动已关闭，可点击立即启动"
-        : "Runtime 已连接，Agent 路径已自动检测";
+        : runtimeStatus();
     }).catch((error) => {
       refreshDetectedFields(doc);
       if (status) status.textContent = "自动连接失败: " + error.message;
@@ -144,9 +195,7 @@
         refreshDetectedFields(doc);
         const tokenInput = doc.querySelector("#zotagent-runtime-token");
         if (tokenInput) tokenInput.value = get("runtimeToken") || "";
-        result.textContent = state.status === "running"
-          ? "Runtime 已在运行，连接正常"
-          : "Runtime 已启动并通过鉴权检测";
+        result.textContent = runtimeStatus();
       } catch (error) {
         refreshDetectedFields(doc);
         result.textContent = "启动失败: " + error.message;
@@ -170,7 +219,7 @@
         const health = await Zotero.ZotAgent.runtimeManager.request("/v1/health");
         if (health.ok) {
           const hData = await health.json();
-          lines.unshift(`Runtime: ✓ PID ${hData.pid}, 活跃请求 ${hData.runningRequests}`);
+          lines.unshift(runtimeStatus() + `\n活跃请求 ${hData.runningRequests}`);
         }
         result.textContent = lines.join("\n");
       } catch (error) {

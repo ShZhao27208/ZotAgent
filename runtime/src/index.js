@@ -5,8 +5,8 @@ import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 import { writeFileSync, mkdirSync, unlinkSync } from "node:fs";
-import { loadConfig, resolveClaudePath } from "./config.js";
-import { existsSync, statSync } from "node:fs";
+import { loadConfig } from "./config.js";
+import { statSync } from "node:fs";
 import {
   envelope,
   isAuthorized,
@@ -18,6 +18,7 @@ import {
 import { createAdapters } from "./adapters/index.js";
 import {
   classifyRawEvent,
+  extractError,
   extractSessionID,
   createTextExtractor,
   extractModel,
@@ -33,7 +34,8 @@ import {
   subscribePtySession,
   resizePtySession,
 } from "./pty-manager.js";
-import { shellInvocation, shellCommandName, ptyShellArgs } from "./shell.js";
+import { ptyShellArgs } from "./shell.js";
+import { createAgentLauncher, agentPlatform, nativePlatform, pathMatchesPlatform, toWSLPath } from "./agent-launch.js";
 
 const config = loadConfig();
 if (process.platform === "win32") {
@@ -42,6 +44,7 @@ if (process.platform === "win32") {
 }
 let adapters = createAdapters(config.executables, config.platforms);
 const running = new Map();
+const launcher = createAgentLauncher(config);
 
 function validateRunRequest(body) {
   const agent = String(body.agent || "");
@@ -54,7 +57,7 @@ function validateRunRequest(body) {
     rawCwd || (adapter.platform === "windows" ? config.defaultWindowsCwd : config.defaultCwd),
     config.defaultWindowsCwd,
   );
-  if (!isAbsolute(cwd)) throw new Error("cwd must be an absolute path");
+  if (!isAbsolute(cwd) && !/^[a-z]:[\\/]/i.test(cwd)) throw new Error("cwd must be an absolute path");
   return {
     requestID: String(body.requestID || randomUUID()),
     windowID: String(body.windowID || "unknown-window"),
@@ -71,10 +74,7 @@ function validateRunRequest(body) {
   };
 }
 
-const TEMP_DIR = join(
-  process.env.USERPROFILE || process.env.HOME || "/tmp",
-  ".local/share/zotero-full-agent/tmp",
-);
+const TEMP_DIR = join(process.env.ZOTAGENT_DATA_DIR || join(process.env.USERPROFILE || process.env.HOME || "/tmp", ".local/share/zotero-full-agent"), "tmp");
 
 function saveImageToTemp(dataURL) {
   mkdirSync(TEMP_DIR, { recursive: true });
@@ -98,12 +98,13 @@ function terminateProcess(child) {
   }
 }
 
-function processInvocation(invocation, agent) {
-  const command = shellCommandName(invocation.command, config.commands[agent]);
-  return { ...invocation, ...shellInvocation(config.shell, command, invocation.args) };
-}
-
-function runAgent(request, response) {
+async function runAgent(request, response) {
+  const location = await launcher.resolve(request.agent);
+  if (response.destroyed || response.writableEnded) return;
+  if (location.platform === "wsl" && process.platform === "win32") {
+    request.cwd = request.cwd === config.defaultCwd ? location.defaultCwd : toWSLPath(request.cwd);
+    if (!request.cwd.startsWith("/")) request.cwd = location.defaultCwd;
+  } else if (!pathMatchesPlatform(request.cwd, location.platform)) request.cwd = location.defaultCwd;
   const ownedFiles = new Set();
   const cleanup = () => {
     for (const file of ownedFiles) { try { unlinkSync(file); } catch {} }
@@ -115,9 +116,15 @@ function runAgent(request, response) {
     request.files.push(imagePath);
     ownedFiles.add(imagePath);
   }
-  const adapter = adapters[request.agent];
+  const adapter = createAdapters({ ...config.executables, [request.agent]: location.executable }, { ...config.platforms, [request.agent]: location.platform })[request.agent];
   let invocation;
-  try { invocation = processInvocation(adapter.buildInvocation(request), request.agent); }
+  try {
+    const mapped = location.platform === "wsl" && process.platform === "win32";
+    const input = mapped && request.agent !== "claude-code" ? { ...request, files: request.files.map(toWSLPath) } : request;
+    const built = adapter.buildInvocation(input);
+    if (mapped && request.agent === "claude-code") built.args = built.args.map(toWSLPath);
+    invocation = launcher.invocation(location, built, request.agent);
+  }
   catch (error) { cleanup(); throw error; }
   if (invocation.nativeSessionID) {
     request.nativeSessionID = invocation.nativeSessionID;
@@ -146,6 +153,7 @@ function runAgent(request, response) {
     cwd: invocation.cwd,
     env: process.env,
     shell: false,
+    windowsHide: true,
     windowsVerbatimArguments: invocation.windowsVerbatimArguments === true,
     detached: process.platform !== "win32",
     stdio: ["pipe", "pipe", "pipe"],
@@ -155,7 +163,7 @@ function runAgent(request, response) {
     writeEvent(response, envelope(request, "request.completed", { code: null, stderr: error.message }));
     response.end(); return;
   }
-  let stderrTail = "";
+  let stderrTail = "", stdoutTail = "";
   let inputWritten = false, agentResponded = false, submissionSent = false;
   const confirmSubmission = () => {
     if (inputWritten && agentResponded && !submissionSent) {
@@ -170,6 +178,7 @@ function runAgent(request, response) {
   stdout.on("line", (line) => {
     if (!line) return;
     const raw = parseAgentLine(line);
+    if (!raw || raw.type === "process.output") stdoutTail = (stdoutTail + line + "\n").slice(-4000);
     if (raw && raw.type !== "process.output") { agentResponded = true; confirmSubmission(); }
     const sessionID = extractSessionID(raw);
     if (sessionID && sessionID !== request.nativeSessionID) {
@@ -196,7 +205,9 @@ function runAgent(request, response) {
       request.detectedModel = model;
       writeEvent(response, envelope(request, "model.updated", { model }));
     }
-    writeEvent(response, envelope(request, classifyRawEvent(raw), {
+    const eventType = classifyRawEvent(raw);
+    writeEvent(response, envelope(request, eventType, {
+      ...(eventType === "error" ? { message: extractError(raw) } : {}),
       raw,
       nativeSessionID: request.nativeSessionID,
     }));
@@ -221,7 +232,7 @@ function runAgent(request, response) {
     writeEvent(response, envelope(request, "request.completed", {
       code,
       signal,
-      stderr: stderrTail.trim() || null,
+      stderr: stderrTail.trim() || (code !== 0 ? stdoutTail.trim() : "") || null,
       nativeSessionID: request.nativeSessionID,
     }));
     if (!response.writableEnded) response.end();
@@ -248,10 +259,15 @@ function runAgent(request, response) {
   });
 }
 
-function collectVersion(adapter, agent) {
+async function collectVersion(adapter, agent) {
+  let location;
+  try { location = await launcher.resolve(agent); }
+  catch (error) { return { available: false, platform: agentPlatform(config, agent), executable: "", error: error.message }; }
   return new Promise((resolve) => {
-    const invocation = processInvocation(adapter.versionInvocation(), agent);
+    const invocation = launcher.invocation(location, { command: location.executable, args: ["--version"], cwd: location.defaultCwd }, agent);
     const child = spawn(invocation.command, invocation.args, {
+      cwd: invocation.cwd,
+      windowsHide: true,
       env: process.env,
       shell: false,
       windowsVerbatimArguments: invocation.windowsVerbatimArguments === true,
@@ -264,7 +280,7 @@ function collectVersion(adapter, agent) {
     child.stderr.on("data", (chunk) => (stderrOutput += chunk));
     child.on("error", (error) => {
       clearTimeout(timeout);
-      resolve({ available: false, error: error.message });
+      resolve({ available: false, platform: location.platform, executable: location.executable, error: error.message });
     });
     child.on("close", (code) => {
       clearTimeout(timeout);
@@ -272,7 +288,9 @@ function collectVersion(adapter, agent) {
         available: code === 0,
         error: code === 0 ? null : (stderrOutput.trim() || stdoutOutput.trim() || `版本检测失败（退出码 ${code}，可能超时）`),
         version: stdoutOutput.trim().split(/\r?\n/).find(Boolean) || stderrOutput.trim().split(/\r?\n/).find(Boolean) || null,
-        executable: adapter.executable,
+        executable: location.executable,
+        platform: location.platform,
+        defaultCwd: location.defaultCwd,
         shell: config.shell,
       });
     });
@@ -306,6 +324,9 @@ const server = http.createServer(async (request, response) => {
       }
       writeJSON(response, 200, {
         status: "ok",
+        protocolVersion: 3,
+        platform: nativePlatform,
+        wslDistro: process.env.WSL_DISTRO_NAME || null,
         cwdExists,
         pid: process.pid,
         runningRequests: running.size,
@@ -320,7 +341,6 @@ const server = http.createServer(async (request, response) => {
           name,
           {
             ...(await collectVersion(adapter, name)),
-            platform: adapter.platform,
             shell: config.shell,
             supportsImages: adapter.supportsImages,
             supportsApproval: adapter.supportsApproval,
@@ -332,28 +352,20 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === "POST" && url.pathname === "/v1/config/agents") {
       const body = await readJSON(request);
+      const next = { ...config, platforms: { ...config.platforms }, executables: { ...config.executables } };
+      if (typeof body.wslDistro === "string" && body.wslDistro.trim()) next.wslDistro = body.wslDistro.trim();
       for (const name of ["opencode", "codex", "claude-code"]) {
-        const executable = body.executables?.[name];
-        if (executable !== undefined && executable !== null) {
-          const str = String(executable).trim();
-          if (str) {
-            if (!isAbsolute(str)) {
-              process.stderr.write(`[ZotAgent Runtime] skipping non-absolute path for ${name}: ${str}\n`);
-            } else {
-              config.commands[name] = str;
-              config.executables[name] = name === "claude-code" && !existsSync(str)
-                ? resolveClaudePath()
-                : str;
-            }
-          }
-        }
         const platform = body.platforms?.[name];
-        if (platform === "windows" || platform === "wsl") {
-          config.platforms[name] = platform;
+        if (["windows", "wsl", "auto"].includes(platform)) next.platforms[name] = platform;
+        if (Object.hasOwn(body.executables || {}, name)) {
+          const value = String(body.executables[name] || "").trim();
+          // Empty resets detection, including stale paths from another host.
+          if (value && !pathMatchesPlatform(value, agentPlatform(next, name))) throw new Error(`Invalid ${agentPlatform(next, name)} path for ${name}: ${value}`);
+          next.executables[name] = value;
         }
-        const command = body.commands?.[name];
-        if (command) config.commands[name] = String(command).trim();
       }
+      Object.assign(config, next);
+      launcher.clear();
       adapters = createAdapters(config.executables, config.platforms);
       writeJSON(response, 200, {
         status: "updated",
@@ -365,7 +377,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (request.method === "POST" && url.pathname === "/v1/run") {
-      runAgent(validateRunRequest(await readJSON(request)), response);
+      await runAgent(validateRunRequest(await readJSON(request)), response);
       return;
     }
     const cancelMatch = url.pathname.match(/^\/v1\/requests\/([^/]+)\/cancel$/);
@@ -427,19 +439,14 @@ const server = http.createServer(async (request, response) => {
         writeJSON(response, 400, { error: `Unsupported agent: ${agent}` });
         return;
       }
-      const adapter = adapters[agent];
-      const rawCwd = String(body.cwd || "");
-      const cwd = adapter.resolveCwd(
-        rawCwd || (adapter.platform === "windows" ? config.defaultWindowsCwd : config.defaultCwd),
-        config.defaultWindowsCwd,
-      );
+      const location = await launcher.resolve(agent);
+      const adapter = createAdapters({ ...config.executables, [agent]: location.executable }, { ...config.platforms, [agent]: location.platform })[agent];
+      let cwd = String(body.cwd || "") || location.defaultCwd;
+      if (location.platform === "wsl" && process.platform === "win32") cwd = cwd === config.defaultCwd ? location.defaultCwd : toWSLPath(cwd);
+      if (!pathMatchesPlatform(cwd, location.platform)) cwd = location.defaultCwd;
       const interactive = adapter.interactiveArgs(body.sessionID || null, cwd);
-      const ptyInvocation = shellInvocation(
-        config.shell,
-        shellCommandName(adapter.executable, config.commands[agent]),
-        interactive.args,
-      );
-      const session = createPtySession(ptyInvocation.command, ptyShellArgs(ptyInvocation), interactive.cwd, {}, { cols: body.cols, rows: body.rows });
+      const ptyInvocation = launcher.invocation(location, interactive, agent);
+      const session = createPtySession(ptyInvocation.command, ptyShellArgs(ptyInvocation), ptyInvocation.cwd, {}, { cols: body.cols, rows: body.rows });
       writeJSON(response, 200, { ptyID: session.id, agent, cwd });
       return;
     }

@@ -2,9 +2,9 @@
 
 > 本文件记录本地可见的 Git 历史（含推送前待发布提交），不代表 GitHub 每次 push 的事件日志。推送前 hook 自动更新本地历史；实际推送成功后在文末独立记录，可随下一批修改提交。
 
-- 历史截至：2026-09-24T22:12:38+08:00
+- 历史截至：2026-09-26T00:40:42+08:00
 - 项目：`ShZhao27208/ZotAgent`
-- 可见提交：55 个（按 Git 提交时间升序）
+- 可见提交：56 个（按 Git 提交时间升序）
 - 时间：ISO 8601，带时区
 
 ## 远端分支与标签
@@ -19,6 +19,7 @@
 | `v0.3.7` | `9ecca53b9d3a` | 2026-09-24T16:43:22+08:00 | fix(windows): bundle runtime and bootstrap with installed Node v0.3.7 |
 | `v0.3.8` | `8864a74bf9ad` | 2026-09-24T16:59:59+08:00 | fix(installer): extract local XPI without download URI credentials v0.3.8 |
 | `v0.3.9` | `78a69b49d1db` | 2026-09-24T17:12:17+08:00 | fix(installer): use bootstrap version instead of jar manifest HTTP read v0.3.9 |
+| `v0.4.0` | `9ab91882bf00` | 2026-09-26T00:40:42+08:00 | feat: snapshot conversation archive implementation v0.4.0 |
 
 ## 正式版本
 
@@ -46,6 +47,7 @@
 | `0.3.7` | 2026-09-24T16:43:22+08:00 | `9ecca53` | XPI 内置 Runtime 与 Windows PTY，自动部署本机后端并复用已有 Node，无需 WSL。 |
 | `0.3.8` | 2026-09-24T16:59:59+08:00 | `8864a74` | fix(installer): extract local XPI without download URI credentials v0.3.8 |
 | `0.3.9` | 2026-09-24T17:12:17+08:00 | `78a69b4` | fix(installer): use bootstrap version instead of jar manifest HTTP read v0.3.9 |
+| `0.4.0` | 2026-09-26T00:40:42+08:00 | `9ab9188` | feat: snapshot conversation archive implementation v0.4.0 |
 
 ## 本地可见提交
 
@@ -108,6 +110,7 @@
 | 53 | 2026-09-24T16:59:59+08:00 | `0.3.8` | `8864a74` | fix(installer): extract local XPI without download URI credentials v0.3.8 |
 | 54 | 2026-09-24T17:12:17+08:00 | `0.3.9` | `78a69b4` | fix(installer): use bootstrap version instead of jar manifest HTTP read v0.3.9 |
 | 55 | 2026-09-24T22:12:38+08:00 | `0.3.10` | `06d43a6` | fix(windows): preserve CMD wrapper arguments for agent execution v0.3.10 |
+| 56 | 2026-09-26T00:40:42+08:00 | `0.4.0` | `9ab9188` | feat: snapshot conversation archive implementation v0.4.0 |
 
 ## 维护规则
 
@@ -120,3 +123,17 @@
 ## 实际推送记录
 
 仅在推送成功并核对远端 HEAD 后追加；不从 Git 作者时间推算。
+
+### 0.4.0 对话归档当前实现快照
+
+- 提交：`9ab91882bf001f189617b9f1c56df0941e7e21b1`（`9ab9188`）。
+- Git committer 时间：2026-09-26T00:40:42+08:00。
+- 推送成功及远端核对后的记录时间：2026-09-26T00:43:40+08:00（Asia/Shanghai；未追溯精确网络完成时刻）。
+- 远端：`origin` / `git@github.com:ShZhao27208/ZotAgent.git`。
+- 分支：`fix/auto-detect-runtime-and-cli-paths`；标签：`v0.4.0`；已通过 `git ls-remote` 核对二者均为上述完整 SHA。
+- 预览版及安装包：https://github.com/ShZhao27208/ZotAgent/releases/tag/v0.4.0 。
+- 主要改动：原生对话归档、全文不截断、前端取消、截图输入、命名与导出；详见 `RELEASE-0.4.0.md`。
+- 验证：本次构建、语法与产物一致性检查通过；此前自动化结果 124 通过、1 跳过。按用户要求停止运行测试。原生 Zotero 归档记录数量实测失败未修复，Windows/WSL 路径与 OpenCode 问题待处理。
+- 产物：`dist/zotagent-0.4.0.xpi`，14071421 字节。
+- SHA-256：`1bf76c9f4a61719567e5db1795dc40dc99be73e47aadf3b1de3e872b580745aa`。
+- 用户明确要求先推送当前快照再修复；本条为推送后的本地记录，留待下一批提交纳入。
