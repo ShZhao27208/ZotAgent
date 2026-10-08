@@ -2,9 +2,9 @@
 
 > 本文件记录本地可见的 Git 历史（含推送前待发布提交），不代表 GitHub 每次 push 的事件日志。推送前 hook 自动更新本地历史；实际推送成功后在文末独立记录，可随下一批修改提交。
 
-- 历史截至：2026-09-26T03:53:01+08:00
+- 历史截至：2026-09-26T04:50:13+08:00
 - 项目：`ShZhao27208/ZotAgent`
-- 可见提交：59 个（按 Git 提交时间升序）
+- 可见提交：60 个（按 Git 提交时间升序）
 - 时间：ISO 8601，带时区
 
 ## 远端分支与标签
@@ -120,6 +120,7 @@
 | 57 | 2026-09-26T02:22:51+08:00 | `0.4.2` | `0ac91bc` | fix: runtime environments, archive templates and compact chat v0.4.2 |
 | 58 | 2026-09-26T02:59:34+08:00 | `0.4.3` | `9804bfd` | feat: select archive notes and restore native agent sessions v0.4.3 |
 | 59 | 2026-09-26T03:53:01+08:00 | `0.4.4` | `6983166` | fix: show structured sessions in native resume pickers v0.4.4 |
+| 60 | 2026-09-26T04:50:13+08:00 | `0.4.4` | `e4072da` | docs: rewrite README around research workflow and setup |
 
 ## 维护规则
 
@@ -188,3 +189,14 @@
 - 产物：`dist/zotagent-0.4.4.xpi`，14081854 字节。
 - SHA-256：`95b2aca4ad38640e04e950f49aa581655eac621ecf1d43e5ac3199f97234a3f5`。
 - 本条按约定仅在推送完成后本地追加，留待下一完整批次提交，不为记录自身再次推送。
+
+### README 重写（插件版本仍为 0.4.4）
+
+- 提交：`e4072daec51e127f9e68f5d7603ed865f76cf533`（`e4072da`）。
+- Git committer 时间：2026-09-26T04:50:13+08:00。
+- 推送成功、远端核对后的记录时间：2026-09-26T05:08:06+08:00（Asia/Shanghai；未追溯精确网络完成时刻）。
+- 远端：`origin` / `git@github.com:ShZhao27208/ZotAgent.git`。
+- 分支：`fix/auto-detect-runtime-and-cli-paths`；一次提交推送，`git ls-remote` 已核对远端 HEAD 为上述完整 SHA。
+- 内容：README 按项目定位、优势、功能、使用方法重新组织；补全全文、多文献、多窗口、截图、笔记写回、共享自动归档和命名模板；整理 Windows/WSL 配置及恢复命令，修正旧版本说明。随提交纳入上批次 0.4.4 实际发布记录。
+- 验证：本地文档链接、目录锚点、代码围栏、折叠区及 diff 格式检查通过；pre-push 安装包一致性校验通过。纯文档变更，未重新运行功能测试、构建或创建版本标签。
+- 本条为推送后的本地记录，留待下一完整批次提交，不为记录自身再次推送。

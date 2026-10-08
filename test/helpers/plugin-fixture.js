@@ -12,7 +12,7 @@ export function fixture() {
   const errors = [];
   let writes = 0, imports = 0;
   class Item {
-    constructor(type) { this.itemType = type; this.libraryID = 1; this.deleted = false; this.fields = {}; this.html = ''; this.attachments = []; }
+    constructor(type) { this.itemType = type; if (type === 'attachment') this.attachmentContentType = 'application/pdf'; this.libraryID = 1; this.deleted = false; this.fields = {}; this.html = ''; this.attachments = []; }
     get parentKey() { return items.get(this.parentID)?.key; }
     getField(name) { return this.fields[name] || ''; }
     getCreators() { return [{ lastName: 'Author' }]; }

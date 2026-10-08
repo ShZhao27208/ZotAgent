@@ -38,7 +38,9 @@ export function shellInvocation(shell, command, args = []) {
     const line = ["&", quotePowerShell(command), ...args.map(quotePowerShell)].join(" ");
     return { command: name === "pwsh" ? "pwsh" : "powershell.exe", args: ["-NoLogo", "-Command", line] };
   }
-  return { command: name, args: ["-l", "-i", "-c", [quotePosix(command), ...args.map(quotePosix)].join(" ")] };
+  // Shell startup files can change directory. Reassert the inherited cwd before
+  // exec so removing redundant CLI directory flags cannot change the project.
+  return { command: name, args: ["-l", "-i", "-c", 'cd -- "$1" || exit 1\nexec ' + [quotePosix(command), ...args.map(quotePosix)].join(" "), "zotagent", "__ZOTAGENT_CWD__"] };
 }
 
 export function shellCommandName(executable, configured) {

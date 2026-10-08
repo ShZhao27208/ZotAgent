@@ -12,8 +12,6 @@ export class CodexAdapter extends AgentAdapter {
         "exec",
         "--json",
         "--skip-git-repo-check",
-        "--cd",
-        request.cwd,
       ];
       if (request.model) args.push("--model", request.model);
       args.push("-");
@@ -31,6 +29,6 @@ export class CodexAdapter extends AgentAdapter {
   get supportsImages() { return true; }
 
   interactiveArgs(sessionID, cwd) {
-    return { args: ["--cd", cwd, "resume", "--all", "--include-non-interactive"], cwd, resumePicker: true };
+    return { args: ["resume", "--all", "--include-non-interactive"], cwd, resumePicker: true };
   }
 }

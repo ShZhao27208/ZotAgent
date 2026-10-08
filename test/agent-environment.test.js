@@ -4,24 +4,15 @@ import { fixture } from './helpers/plugin-fixture.js';
 import { toWSLPath, pathMatchesPlatform, createAgentLauncher, nativePlatform } from '../runtime/src/agent-launch.js';
 
 const key=name=>'extensions.zotagent.'+name;
-test('Windows Runtime forwards per-agent WSL choice and clears mismatched paths before detection',async()=>{
+test('manual paths are preserved on mismatch and detection never replaces explicit paths',async()=>{
   const f=fixture();f.Zotero.isWin=true;
   f.prefs.set(key('opencodePlatform'),'wsl');f.prefs.set(key('opencodePath'),'C:\\old\\opencode.cmd');
-  f.prefs.set(key('codexPath'),'/home/old/codex');
-  const requests=[];
-  f.api.RuntimeManager.request=async(route,options)=>{
-    requests.push({route,options});
-    if(route==='/v1/config/agents') {
-      assert.equal(f.prefs.get(key('codexPath')),'');
-      return {ok:true};
-    }
-    return {ok:true,json:async()=>({opencode:{available:true,platform:'wsl',executable:'/home/user/bin/opencode'},codex:{available:false,platform:'windows',executable:'C:\\bin\\codex.cmd',error:'version failed'}})};
-  };
+  await assert.rejects(new f.api.RuntimeClient(null).syncAgentPaths(),/手动路径与所选环境不匹配/);
+  assert.equal(f.prefs.get(key('opencodePath')),'C:\\old\\opencode.cmd');
+  f.prefs.set(key('opencodePath'),'/custom/opencode');
+  f.api.RuntimeManager.request=async route=>route==='/v1/config/agents'?{ok:true}:{ok:true,json:async()=>({opencode:{available:false,executable:'/other/opencode'},codex:{available:true,executable:'C:\\bin\\codex.cmd'}})};
   await new f.api.RuntimeClient(null).syncAgentPaths();
-  const sent=JSON.parse(requests[0].options.body);
-  assert.equal(sent.platforms.opencode,'wsl');assert.equal(sent.platforms.codex,'auto');
-  assert.equal(sent.executables.opencode,'');assert.equal(sent.executables.codex,'');
-  assert.equal(f.prefs.get(key('opencodePath')),'/home/user/bin/opencode');
+  assert.equal(f.prefs.get(key('opencodePath')),'/custom/opencode');
   assert.equal(f.prefs.get(key('codexPath')),'C:\\bin\\codex.cmd');
 });
 test('host profiles restore Windows and WSL settings instead of converting one into the other',()=>{
@@ -38,11 +29,11 @@ test('host profiles restore Windows and WSL settings instead of converting one i
 });
 test('healthy but wrong host or old protocol is not silently reused',async()=>{
   const f=fixture();f.Zotero.isWin=true;const m=f.api.RuntimeManager;
-  m.request=async()=>({ok:true,json:async()=>({platform:'wsl',protocolVersion:5})});
+  m.request=async()=>({ok:true,json:async()=>({platform:'wsl',protocolVersion:6})});
   assert.equal(await m.probe(),'wrong-environment');
   m.request=async()=>({ok:true,json:async()=>({platform:'windows',protocolVersion:2})});
   assert.equal(await m.probe(),'outdated');
-  m.request=async()=>({ok:true,json:async()=>({platform:'windows',protocolVersion:5})});
+  m.request=async()=>({ok:true,json:async()=>({platform:'windows',protocolVersion:6})});
   assert.equal(await m.probe(),'running');
 });
 test('custom endpoint is preserved when environment does not match',async()=>{
@@ -68,7 +59,7 @@ test('terminal environment survives native and cross-host launch without changin
   const remote={platform:nativePlatform==='windows'?'wsl':'windows',executable:'/bin/claude',distro:'Ubuntu'};
   const wsl=launcher.invocation(remote,built,'claude-code');
   assert.equal(wsl.command,'wsl.exe');
-  assert.match(wsl.args.at(-1),/export CLAUDE_CODE_ENTRYPOINT='sdk-cli'\nexec/);
+  assert.match(wsl.args.at(-1),/export CLAUDE_CODE_ENTRYPOINT='sdk-cli'\ncd -- '\/work' \|\| exit 1\nexec/);
   assert.throws(()=>launcher.invocation(remote,{...built,env:{'INVALID;name':'x'}},'claude-code'),/Invalid Agent environment/);
   assert.equal(process.env.CLAUDE_CODE_ENTRYPOINT,before);
 });

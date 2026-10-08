@@ -52,8 +52,38 @@
         lines.push(`  JSON 输出: ✓ --format json`);
       }
       result.textContent = lines.join("\n");
+      if (agentName === "opencode") await refreshModels(doc);
     } catch (error) {
       result.textContent = `检测失败: ${error.message}\n请确认 Runtime Host 已启动`;
+    }
+  }
+
+  async function refreshModels(doc, force = false) {
+    const select = doc.querySelector("#zotagent-opencode-model");
+    if (select._refreshing) return;
+    select._refreshing = true;
+    const status = doc.querySelector("#zotagent-agent-result");
+    const environment = () => JSON.stringify(["runtimeHost", "runtimeEndpoint", "wslDistro", "opencodePath", "opencodePlatform"].map(get));
+    const originalEnvironment = environment();
+    try {
+      await Zotero.ZotAgent.runtimeManager.ensureRunning();
+      const response = await Zotero.ZotAgent.runtimeManager.request("/v1/opencode/models" + (force ? "?refresh=1" : ""), {}, 65000);
+      const data = await response.json();
+      if (environment() !== originalEnvironment) return;
+      if (!response.ok) throw new Error(data.error || `Runtime ${response.status}`);
+      // Discard a result if the user chose another model while it was loading.
+      const current = String(get("opencodeModel") || "");
+      select.replaceChildren();
+      const add = (value, label) => { const option = doc.createElementNS("http://www.w3.org/1999/xhtml", "option"); option.value = value; option.textContent = label; select.append(option); };
+      add("", "跟随 OpenCode 最近使用的模型" + (data.recent ? `（${data.recent}）` : "（暂无可读记录）"));
+      for (const model of data.models) add(model, model);
+      if (current && !data.models.includes(current)) add(current, current + "（已不在可用列表中，请重新选择）");
+      select.value = current;
+      status.textContent = `已读取 ${data.models.length} 个模型 ID` + (data.recentError ? "；最近模型读取失败：" + data.recentError : "");
+    } catch (error) { status.textContent = "模型刷新失败，已保留选择：" + error.message; }
+    finally {
+      select._refreshing = false;
+      if (environment() !== originalEnvironment) refreshModels(doc);
     }
   }
 
@@ -159,6 +189,7 @@
           }
           if (name === "runtimeHost" || name === "wslDistro") Zotero.ZotAgent.runtimeManager.selectRuntimeProfile();
           refreshDetectedFields(doc);
+          refreshModels(doc);
           doc.querySelector("#zotagent-runtime-result").textContent = "运行环境已保存。点击“连接并检测”以检测所选环境的 Agent；下一次发送也会应用此设置。";
         }
         if (name === "archiveSort") {
@@ -174,11 +205,29 @@
       }
     }
 
+    const modelSelect = doc.querySelector("#zotagent-opencode-model");
+    const initialModel = String(get("opencodeModel") || "");
+    if (initialModel) {
+      const option = doc.createElementNS("http://www.w3.org/1999/xhtml", "option");
+      option.value = initialModel; option.textContent = initialModel + "（待检测）"; modelSelect.append(option); modelSelect.value = initialModel;
+    }
+    modelSelect.addEventListener("focus", () => refreshModels(doc));
+    modelSelect.addEventListener("mousedown", () => refreshModels(doc));
+    doc.querySelector("#zotagent-refresh-models")?.addEventListener("command", () => refreshModels(doc, true));
+    for (const action of ["stop", "restart"]) doc.querySelector("#zotagent-" + action + "-runtime")?.addEventListener("command", async () => {
+      const result = doc.querySelector("#zotagent-runtime-result");
+      try {
+        if (!await Zotero.ZotAgent.runtimeManager.stop(win)) return;
+        result.textContent = "Runtime 已停止，端口已释放；点击启动后才能继续提问。";
+        if (action === "restart") { await Zotero.ZotAgent.runtimeManager.start(); result.textContent = runtimeStatus(); }
+      } catch (error) { result.textContent = "操作失败：" + error.message; }
+    });
     preview();
     const status = doc.querySelector("#zotagent-runtime-result");
     if (status) status.textContent = "正在连接 Runtime 并检测 Agent...";
     Zotero.ZotAgent.runtimeManager.ensureRunning().then((state) => {
       refreshDetectedFields(doc);
+      if (state.status !== "disabled") refreshModels(doc);
       if (status) status.textContent = state.status === "disabled"
         ? "Runtime 自动启动已关闭，可点击立即启动"
         : runtimeStatus();
@@ -191,7 +240,7 @@
       const result = doc.querySelector("#zotagent-runtime-result");
       result.textContent = get("runtimeHost") === "wsl" ? "正在启动 WSL Runtime..." : "正在部署并启动本机 Runtime...";
       try {
-        const state = await Zotero.ZotAgent.runtimeManager.ensureRunning(true);
+        const state = await Zotero.ZotAgent.runtimeManager.start();
         refreshDetectedFields(doc);
         const tokenInput = doc.querySelector("#zotagent-runtime-token");
         if (tokenInput) tokenInput.value = get("runtimeToken") || "";

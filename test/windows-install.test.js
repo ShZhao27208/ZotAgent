@@ -105,3 +105,14 @@ test('bootstrap passes host version to installer before startup hooks run', asyn
   await sandbox.startup({ rootURI: 'jar:file:///installed.xpi!/', version: '0.3.9' });
   assert.equal(startupVersion, '0.3.9');
 });
+
+test('invalid manual Node path is preserved instead of falling back to PATH',async()=>{
+  const f=fixture();f.prefs.set('extensions.zotagent.runtimeNodePath','C:\\missing\\node.exe');
+  await assert.rejects(f.plugin.prepareWindowsRuntime(),/手动配置的 Node.js 路径无效/);
+  assert.equal(f.prefs.get('extensions.zotagent.runtimeNodePath'),'C:\\missing\\node.exe');
+});
+test('invalid manual Runtime script is preserved instead of deploying over it',async()=>{
+  const f=fixture();f.prefs.set('extensions.zotagent.runtimeScriptPath','C:\\custom\\index.js');
+  await assert.rejects(f.plugin.prepareWindowsRuntime(),/手动 Runtime 脚本路径无效/);
+  assert.equal(f.prefs.get('extensions.zotagent.runtimeScriptPath'),'C:\\custom\\index.js');assert.equal(f.archives(),0);
+});

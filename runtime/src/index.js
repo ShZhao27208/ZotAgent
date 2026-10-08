@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import http from "node:http";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
@@ -37,6 +37,8 @@ import {
 import { ptyShellArgs } from "./shell.js";
 import { createAgentLauncher, agentPlatform, nativePlatform, pathMatchesPlatform, toWSLPath } from "./agent-launch.js";
 
+import { createModelCatalog, selectModel } from "./opencode-models.js";
+
 const config = loadConfig();
 if (process.platform === "win32") {
   const { dirname, delimiter } = await import("node:path");
@@ -45,6 +47,9 @@ if (process.platform === "win32") {
 let adapters = createAdapters(config.executables, config.platforms);
 const running = new Map();
 const launcher = createAgentLauncher(config);
+const modelCatalog = createModelCatalog(launcher);
+const instanceID = randomUUID();
+let stopping = false;
 
 function validateRunRequest(body) {
   const agent = String(body.agent || "");
@@ -92,7 +97,7 @@ function terminateProcess(child) {
   if (!child || child.exitCode !== null) return;
   try {
     if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGTERM");
-    else child.kill("SIGTERM");
+    else if (child.pid) execFile("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true }, () => {});
   } catch {
     child.kill("SIGTERM");
   }
@@ -114,6 +119,11 @@ async function runAgent(request, response) {
     request.cwd = request.cwd === config.defaultCwd ? location.defaultCwd : toWSLPath(request.cwd);
     if (!request.cwd.startsWith("/")) request.cwd = location.defaultCwd;
   } else if (!pathMatchesPlatform(request.cwd, location.platform)) request.cwd = location.defaultCwd;
+  if (request.agent === "opencode") {
+    const catalog = await modelCatalog(location);
+    request.model = selectModel(catalog.models, request.model, catalog.recent, catalog.recentError);
+  }
+  if (stopping) throw new Error("Runtime 正在停止");
   const ownedFiles = new Set();
   const cleanup = () => {
     for (const file of ownedFiles) { try { unlinkSync(file); } catch {} }
@@ -144,6 +154,9 @@ async function runAgent(request, response) {
     cwd: request.cwd,
     nativeSessionID: request.nativeSessionID,
   }));
+  if (request.agent === "opencode") {
+    writeEvent(response, envelope(request, "model.updated", { model: request.model }));
+  }
   if (request.nativeSessionID) {
     writeEvent(response, envelope(request, "session.updated", {
       nativeSessionID: request.nativeSessionID,
@@ -216,7 +229,7 @@ async function runAgent(request, response) {
     }
     const eventType = classifyRawEvent(raw);
     writeEvent(response, envelope(request, eventType, {
-      ...(eventType === "error" ? { message: extractError(raw) } : {}),
+      ...(eventType === "error" ? { message: extractError(raw) + (request.agent === "opencode" ? ` · 模型：${request.model}。请检查该模型的服务状态、登录或额度；可在设置中刷新模型后重试。` : "") } : {}),
       raw,
       nativeSessionID: request.nativeSessionID,
     }));
@@ -324,6 +337,19 @@ const server = http.createServer(async (request, response) => {
 
   try {
     const url = new URL(request.url, `http://${config.host}:${config.port}`);
+    if (request.method === "POST" && url.pathname === "/v1/runtime/stop") {
+      const body = await readJSON(request);
+      if (body.instanceID !== instanceID) { writeJSON(response, 409, { error: "Runtime 实例已改变，请重新检测" }); return; }
+      if (!body.force && (running.size || listPtySessions().some(s => s.alive))) { writeJSON(response, 409, { error: "有新任务正在运行，请重新确认停止" }); return; }
+      stopping = true;
+      writeJSON(response, 202, { status: "stopping" });
+      setImmediate(shutdown); return;
+    }
+    if (stopping) { writeJSON(response, 503, { error: "Runtime 正在停止" }); return; }
+    if (request.method === "GET" && url.pathname === "/v1/opencode/models") {
+      const location = await launcher.resolve("opencode");
+      writeJSON(response, 200, await modelCatalog(location, url.searchParams.get("refresh") === "1")); return;
+    }
     if (request.method === "GET" && url.pathname === "/v1/health") {
       let cwdExists = null;
       const requestedCwd = url.searchParams.get("cwd");
@@ -333,7 +359,10 @@ const server = http.createServer(async (request, response) => {
       }
       writeJSON(response, 200, {
         status: "ok",
-        protocolVersion: 5,
+        protocolVersion: 6,
+        service: "zotagent", instanceID,
+        activeRequests: [...running.values()].map(({ request }) => ({ agent: request.agent, requestID: request.requestID })),
+        activeTerminals: listPtySessions().filter(s => s.alive).map(s => ({ agent: s.agent, id: s.id })),
         platform: nativePlatform,
         wslDistro: process.env.WSL_DISTRO_NAME || null,
         cwdExists,
@@ -457,6 +486,7 @@ const server = http.createServer(async (request, response) => {
       const interactive = adapter.interactiveArgs(nativeSessionID, cwd);
       assertSessionIdle(agent, nativeSessionID, interactive.resumePicker);
       const ptyInvocation = launcher.invocation(location, interactive, agent);
+      if (stopping) throw new Error("Runtime 正在停止");
       const session = createPtySession(ptyInvocation.command, ptyShellArgs(ptyInvocation), ptyInvocation.cwd, ptyInvocation.env || {}, { cols: body.cols, rows: body.rows });
       const resumedID = agent === "opencode" || interactive.resumePicker ? null : nativeSessionID;
       session.agent = agent; session.nativeSessionID = resumedID;
@@ -523,7 +553,7 @@ server.on("error", (error) => {
 
 server.listen(config.port, config.host, () => {
   process.stderr.write(
-    `[ZotAgent Runtime] listening on http://${config.host}:${config.port}\n`,
+    `[ZotAgent Runtime] listening on http://${config.host}:${server.address().port}\n`,
   );
   if (config.generatedToken) {
     process.stderr.write(`[ZotAgent Runtime] generated token: ${config.token}\n`);
@@ -531,6 +561,8 @@ server.listen(config.port, config.host, () => {
 });
 
 function shutdown() {
+  stopping = true;
+  setTimeout(() => { server.closeAllConnections(); process.exit(0); }, 2500).unref();
   for (const { child } of running.values()) terminateProcess(child);
   for (const session of listPtySessions()) closePtySession(session.id);
   server.close(() => process.exit(0));

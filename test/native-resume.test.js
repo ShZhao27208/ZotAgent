@@ -46,7 +46,7 @@ for (const agent of ['claude-code','codex']) test(`Runtime opens ${agent} picker
   finally {controller.abort();}
   const terminalReady=JSON.parse(output.split(/\r?\n/).find(line=>line.startsWith('{')&&line.includes('fixture.ready')));
   if(agent==='claude-code'){assert.deepEqual(terminalReady.args,['--resume']);assert.equal(terminalReady.entrypoint,'sdk-cli');}
-  else assert.deepEqual(terminalReady.args,['--cd',directory,'resume','--all','--include-non-interactive']);
+  else assert.deepEqual(terminalReady.args,['resume','--all','--include-non-interactive']);
   assert.ok(!terminalReady.args.includes(nativeSessionID));
   const second=await request('/v1/run',{agent,windowID:'other',requestID:'other',prompt:'must not launch',nativeSessionID,cwd:directory});
   assert.equal(second.status,400);assert.match(await second.text(),/会话仍在/);

@@ -37,6 +37,20 @@
     Zotero.Prefs.set(PREF_ROOT + name, value, true);
   }
 
+  async function preferredPDF(entry, primary = false) {
+    const isPDF = item => item && (item.attachmentContentType === "application/pdf" || item.isPDFAttachment?.());
+    if (primary && isPDF(entry.attachment)) return entry.attachment;
+    const item = entry.topItem;
+    if (isPDF(item)) return item;
+    const best = await item?.getBestAttachment?.();
+    if (isPDF(best)) return best;
+    for (const id of item?.getAttachments?.() || []) {
+      const candidate = await Zotero.Items.getAsync(id);
+      if (isPDF(candidate)) return candidate;
+    }
+    return null;
+  }
+
   async function extractPdfText(attachment) {
     const id = Number(attachment?.id || 0);
     if (!id) return { text: "", source: "none" };
@@ -53,7 +67,8 @@
     })();
     pdfTextCache.set(id, task);
     const result = await task;
-    pdfTextCache.set(id, result);
+    if (result.text) pdfTextCache.set(id, result);
+    else pdfTextCache.delete(id);
     return result;
   }
 
@@ -117,7 +132,7 @@
 
     normalizePaths() {
       if (Zotero.isWin && pref("runtimeHost", "auto") !== "wsl") return;
-      for (const name of ["runtimeScriptPath", "runtimeNodePath", "defaultWorkingDirectory", "opencodePath", "codexPath", "claudePath"]) {
+      for (const name of ["runtimeScriptPath", "runtimeNodePath", "defaultWorkingDirectory"]) {
         const platformName = { opencodePath: "opencodePlatform", codexPath: "codexPlatform", claudePath: "claudePlatform" }[name];
         if (platformName && pref(platformName, "auto") === "windows") continue;
         const current = String(pref(name, "")).trim();
@@ -136,7 +151,7 @@
           this._health = health;
           if ((health.platform || health.shell?.platform) !== this.desiredPlatform()) return "wrong-environment";
           if (this.desiredPlatform() === "wsl" && health.wslDistro && health.wslDistro !== String(pref("wslDistro", "Ubuntu"))) return "wrong-environment";
-          if (Number(health.protocolVersion || 0) < 5) return "outdated";
+          if (Number(health.protocolVersion || 0) < 6) return "outdated";
           const incorrectHomeCase = health.cwdExists === false && cwd.toLowerCase() === health.defaultCwd?.toLowerCase();
           if ((!cwd || incorrectHomeCase || (Zotero.isWin && pref("runtimeHost", "auto") !== "wsl" && cwd.startsWith("/"))) && health.defaultCwd && (/^[a-z]:[\\/]/i.test(health.defaultCwd) || health.defaultCwd.startsWith("/"))) {
             setPref("defaultWorkingDirectory", health.defaultCwd);
@@ -247,6 +262,7 @@
     },
 
     async ensureRunning(force = false) {
+      if (this._manualStopped) throw new Error("Runtime 已手动停止，请在设置中点击启动 Runtime");
       if (this._pending) return this._pending;
       this.selectRuntimeProfile();
       this._pending = this._ensureRunning(force).then(async (state) => {
@@ -260,6 +276,15 @@
     async _ensureRunning(force = false) {
       const current = await this.probe();
       if (current === "running") return { status: "running" };
+      if (current === "outdated" && this._health?.service === "zotagent" && this._health?.instanceID) {
+        const stopped = await this.request("/v1/runtime/stop", { method: "POST", body: JSON.stringify({ instanceID: this._health.instanceID, force: false }) });
+        if (!stopped.ok) throw new Error("旧版 Runtime 仍有任务运行，请先停止任务后更新连接");
+        for (let attempt = 0; attempt < 20; attempt++) {
+          if (await this.probe() === "offline") return this._startAndWait();
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+        throw new Error("旧版 Runtime 尚未释放端口，请稍后重试");
+      }
       if (["wrong-environment", "outdated"].includes(current)) {
         // Keep the existing service alive. Use a distinct authenticated endpoint
         // for the requested host/new protocol; never silently reuse the old one.
@@ -306,6 +331,37 @@
           this._connectingEndpoint = null;
         }
       }
+    },
+
+    async start() {
+      this._manualStopped = false;
+      return this.ensureRunning(true);
+    },
+
+    async stop(win) {
+      if (this._pending) throw new Error("正在连接 Runtime，请等待连接完成后停止");
+      const response = await this.request("/v1/health");
+      if (!response.ok) throw new Error("无法验证 Runtime 身份；未停止任何进程");
+      const health = await response.json();
+      if (health.service !== "zotagent" || !health.instanceID) throw new Error("该服务不支持安全停止，请从启动它的终端退出；未按端口杀进程");
+      const active = [...(health.activeRequests || []).map(r => `${r.agent} · ${r.requestID}`), ...(health.activeTerminals || []).map(r => `原生终端 ${r.agent} · ${r.id}`)];
+      if (active.length && !win.confirm("停止将中断以下任务：\n" + active.join("\n") + "\n是否继续？")) return false;
+      const stopped = await this.request("/v1/runtime/stop", { method: "POST", body: JSON.stringify({ instanceID: health.instanceID, force: active.length > 0 }) });
+      if (!stopped.ok) throw new Error((await stopped.json()).error || "停止失败");
+      this._manualStopped = true;
+      for (let attempt = 0; attempt < 30; attempt++) {
+        try {
+          const probe = await this.request("/v1/health", {}, 500);
+          if (!probe.ok) throw new Error("端口上出现其他服务；请检查 Endpoint");
+          const current = await probe.json();
+          if (current.instanceID !== health.instanceID) throw new Error("端口上的服务已更换；未停止新服务");
+        } catch (error) {
+          if (error.message.includes("服务")) throw error;
+          this._health = null; return true;
+        }
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      throw new Error("停止已请求，但端口尚未释放；请稍后重试");
     },
 
     async _startAndWait() {
@@ -811,9 +867,8 @@
         const actual = platforms[agent] === "auto" ? hostPlatform : platforms[agent];
         const value = String(pref(pathPref, "")).trim();
         const matches = actual === "windows" ? /^(?:[a-z]:[\\/]|\\\\(?!wsl[.$]))/i.test(value) : value.startsWith("/");
-        executables[agent] = matches ? value : "";
-        // Remove misleading paths even when version detection subsequently fails.
-        if (value && !matches) setPref(pathPref, "");
+        if (value && !matches) throw new Error(`${agent} 手动路径与所选环境不匹配：${value}；请修正或清空后重新检测`);
+        executables[agent] = value;
       }
       const response = await RuntimeManager.request("/v1/config/agents", {
         method: "POST", body: JSON.stringify({ executables, platforms, wslDistro: String(pref("wslDistro", "Ubuntu")) }),
@@ -829,7 +884,7 @@
           if (!definitions[agent]) continue;
           const pathPref = definitions[agent][0];
           const value = String(info.executable || "");
-          setPref(pathPref, value);
+          if (!String(pref(pathPref, "")).trim() && info.available && value) setPref(pathPref, value);
         }
       } catch (error) {
         throw new Error("Agent 自动检测失败: " + error.message);
@@ -942,6 +997,84 @@
       this.controller.layer.appendChild(this.element);
       this._archiveUnsubscribe = Zotero.ZotAgent.archive?.subscribe(() => this.updateArchiveBar());
       this.updateContext();
+      this.installAutoFit();
+    }
+
+    installAutoFit() {
+      if (!this.win.requestAnimationFrame || !this.element.getBoundingClientRect) return;
+      this._fitBaseline = { width: 460, height: 680 };
+      this._scheduleFit = () => {
+        if (this._fitFrame || this._destroyed || this._fitPointerActive) return;
+        this._fitFrame = this.win.requestAnimationFrame(() => {
+          this._fitFrame = null;
+          if (!this._destroyed) this.fitContent();
+        });
+      };
+      if (this.win.MutationObserver) {
+        this._contentObserver = new this.win.MutationObserver(records => {
+          if (records.some(record => record.target !== this.element || record.attributeName !== "style")) this._scheduleFit();
+        });
+        this._contentObserver.observe(this.element, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["class", "style", "hidden"] });
+      }
+      // Observe content mutations, not layout sizes: resizing a child is an
+      // effect of fitting and must never feed back into another fit pass.
+      this._beginManualFit = () => {
+        this._fitPointerActive = true;
+        this._pointerStartSize = this.element.getBoundingClientRect();
+        if (this._fitFrame) this.win.cancelAnimationFrame(this._fitFrame);
+        this._fitFrame = null;
+      };
+      this._rememberManualSize = () => {
+        if (!this._fitPointerActive) return;
+        this._fitPointerActive = false;
+        const rect = this.element.getBoundingClientRect();
+        const before = this._pointerStartSize;
+        if (!this.element.classList.contains("is-minimized") && before &&
+          (Math.abs(rect.width - before.width) > 3 || Math.abs(rect.height - before.height) > 3)) {
+          this._manualFitSize = { width: rect.width, height: rect.height };
+        }
+        this._pointerStartSize = null;
+        this._scheduleFit();
+      };
+      this.element.addEventListener("pointerdown", this._beginManualFit, true);
+      this.win.addEventListener("resize", this._scheduleFit);
+      this.win.addEventListener("pointerup", this._rememberManualSize);
+      this.win.addEventListener("pointercancel", this._rememberManualSize);
+      this.win.addEventListener("blur", this._rememberManualSize);
+      this.element.addEventListener("input", this._scheduleFit);
+      this.element.addEventListener("load", this._scheduleFit, true);
+      this._scheduleFit();
+    }
+
+    fitContent() {
+      const root = this.element;
+      if (this._fitPointerActive || root.classList.contains("is-minimized")) return;
+      const viewportWidth = this.win.innerWidth || 1024;
+      const viewportHeight = this.win.innerHeight || 800;
+      const maxWidth = Math.max(1, viewportWidth - 24), maxHeight = Math.max(1, viewportHeight - 24);
+      const baseline = this._fitBaseline || { width: 460, height: 680 };
+      const rect = root.getBoundingClientRect();
+      const context = root.querySelector(".zotagent-context-details");
+      // Reference titles wrap instead of requiring unbounded horizontal growth.
+      const width = Math.min(maxWidth, this._manualFitSize?.width ?? Math.max(rect.width, baseline.width, this.extraItems.length ? 520 : 460));
+      const set = (name, value) => { if (root.style[name] !== value) root.style[name] = value; };
+      set("width", `${Math.ceil(width)}px`);
+      const contextHeight = Math.min(context?.scrollHeight || 0, maxHeight * 0.55);
+      root.style.setProperty("--za-context-height", `${Math.ceil(contextHeight)}px`);
+      let chromeHeight = 0;
+      for (const child of root.children) {
+        if (child === context || child === this.messagesElement || child === this.ptyContainer || child === this._pdfExportPanel) continue;
+        chromeHeight += child.getBoundingClientRect().height;
+      }
+      const messageHeight = 160; // Fixed reading space; scrollHeight includes allocated space and causes feedback.
+      const overlayHeight = this._pdfExportPanel?.isConnected ? Math.min(760, 210 + (this.context ? 1 : 0) * 40 + this.extraItems.length * 40) : 0;
+      const height = Math.min(maxHeight, this._manualFitSize?.height ?? Math.max(rect.height, baseline.height, chromeHeight + contextHeight + messageHeight + 4, overlayHeight));
+      const left = Math.max(12, Math.min(rect.left, viewportWidth - width - 12));
+      const top = Math.max(12, Math.min(rect.top, viewportHeight - height - 12));
+      set("left", `${Math.round(left)}px`); set("top", `${Math.round(top)}px`);
+      root.style.setProperty("--za-top", `${Math.round(top)}px`);
+      set("height", `${Math.ceil(height)}px`);
+      this._lastFit = { width: Math.ceil(width), height: Math.ceil(height) };
     }
 
     build() {
@@ -1026,7 +1159,7 @@
       this.fullTextCheckbox = createElement(this.doc, "input");
       this.fullTextCheckbox.type = "checkbox";
       this.fullTextCheckbox.id = `${this.id}-fulltext`;
-      const fullTextLabel = createElement(this.doc, "label", "zotagent-fulltext-label", "附加 PDF 全文");
+      const fullTextLabel = createElement(this.doc, "label", "zotagent-fulltext-label", "附加主文献全文");
       fullTextLabel.htmlFor = this.fullTextCheckbox.id;
       const importBtn = createElement(this.doc, "button", "zotagent-small-button", "导入选中文献");
       importBtn.title = "将 Zotero 主面板当前选中的条目添加为额外参考文献";
@@ -1040,7 +1173,26 @@
       }
       this.multiModeSelect.addEventListener("change", () => { this._multiMode = this.multiModeSelect.value; });
       this._multiMode = "combined";
-      this.refBar.append(this.fullTextCheckbox, fullTextLabel, importBtn, this.multiModeSelect);
+      const selectAll = createElement(this.doc, "button", "zotagent-small-button", "全部附加全文");
+      selectAll.addEventListener("click", () => this.setAllFullText(true));
+      const clearAll = createElement(this.doc, "button", "zotagent-small-button", "全部取消");
+      clearAll.addEventListener("click", () => this.setAllFullText(false));
+      const exportPDF = createElement(this.doc, "button", "zotagent-small-button", "导出 PDF 文本");
+      exportPDF.addEventListener("click", () => this.showPDFExport());
+      const documentActions = createElement(this.doc, "div", "zotagent-document-actions");
+      const documentTitle = createElement(this.doc, "strong", "", "文献");
+      documentActions.append(documentTitle, importBtn, exportPDF);
+      const fullTextActions = createElement(this.doc, "div", "zotagent-fulltext-actions");
+      const primaryChoice = createElement(this.doc, "span", "zotagent-primary-choice");
+      primaryChoice.append(this.fullTextCheckbox, fullTextLabel);
+      selectAll.textContent = "全选全文";
+      clearAll.textContent = "取消全选";
+      selectAll.title = "勾选主文献与全部参考文献的全文，不立即发送";
+      clearAll.title = "取消主文献与全部参考文献的全文勾选";
+      fullTextActions.append(primaryChoice, selectAll, clearAll);
+      const analysisMode = createElement(this.doc, "label", "zotagent-analysis-mode", "处理方式");
+      analysisMode.append(this.multiModeSelect);
+      this.refBar.append(documentActions, fullTextActions, analysisMode);
 
       this.archiveBar = createElement(this.doc, "div", "zotagent-archive-bar");
       this.archiveLabel = createElement(this.doc, "span", "zotagent-archive-label", "本次不会自动归档");
@@ -1072,9 +1224,11 @@
 
       const composer = createElement(this.doc, "div", "zotagent-composer");
       this.promptInput = createElement(this.doc, "textarea", "zotagent-prompt-input");
-      this.promptInput.placeholder = "向当前 Agent 提问";
+      this.promptInput.placeholder = "向当前 Agent 提问（Enter 发送，Shift+Enter 换行）";
       this.promptInput.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) this.send();
+        if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229 && !event.repeat) {
+          event.preventDefault(); this.send();
+        }
       });
       this.sendButton = createElement(this.doc, "button", "zotagent-primary-button", "发送");
       this.sendButton.addEventListener("click", () => this.send());
@@ -1250,6 +1404,84 @@
       }
       if (added) this.renderExtraItems();
       else this.renderStatus("没有可导入的新文献（已存在或未选择）");
+    }
+
+    setAllFullText(checked) {
+      this.fullTextCheckbox.checked = checked;
+      for (const entry of this.extraItems) entry.includeFullText = checked;
+      this.renderExtraItems();
+    }
+
+    showPDFExport() {
+      const entries = [this.context, ...this.extraItems].filter(entry => entry?.topItem);
+      if (!entries.length) { this.renderStatus("没有可导出的文献", true); return; }
+      this._pdfExportPanel?.remove();
+      const panel = this._pdfExportPanel = createElement(this.doc, "div", "zotagent-pdf-export");
+      panel.setAttribute("role", "dialog"); panel.setAttribute("aria-label", "选择要导出 PDF 文本的文献");
+      const title = createElement(this.doc, "strong", "zotagent-export-heading", "导出 PDF 文本");
+      const hint = createElement(this.doc, "p", "zotagent-export-hint", "选择文献后，点击底部按钮选择保存文件夹。每篇文献单独保存为 Markdown。");
+      const list = createElement(this.doc, "div", "zotagent-export-list");
+      panel.append(title, hint, list);
+      const choices = entries.map(entry => {
+        const label = createElement(this.doc, "label");
+        const checkbox = createElement(this.doc, "input"); checkbox.type = "checkbox"; checkbox.checked = true;
+        label.append(checkbox, createElement(this.doc, "span", "", entry.title || "未命名")); list.append(label);
+        return { entry, checkbox };
+      });
+      const save = createElement(this.doc, "button", "zotagent-small-button", "选择文件夹并导出");
+      const cancel = createElement(this.doc, "button", "zotagent-small-button", "取消");
+      const close = () => { panel.remove(); this._pdfExportPanel = null; this.element.querySelector(".zotagent-document-actions button")?.focus(); };
+      cancel.addEventListener("click", close);
+      panel.addEventListener("keydown", event => {
+        if (event.key === "Escape" && !save.disabled) { event.preventDefault(); event.stopPropagation(); close(); }
+      });
+      save.addEventListener("click", async () => {
+        const selected = choices.filter(c => c.checkbox.checked).map(c => c.entry);
+        if (!selected.length) { hint.textContent = "请至少选择一篇文献。"; return; }
+        save.disabled = true;
+        try {
+          const { FilePicker } = ChromeUtils.importESModule("chrome://zotero/content/modules/filePicker.mjs");
+          const picker = new FilePicker(); picker.init(this.win, "选择 PDF 文本导出文件夹", picker.modeGetFolder);
+          if (await picker.show() !== picker.returnOK) return;
+          hint.textContent = "正在提取 PDF 文本，请稍候…";
+          const result = await this.exportPDFTexts(selected, picker.file);
+          this.renderStatus(`已导出 ${result.saved.length} 篇` + (result.failed.length ? "；失败：" + result.failed.join("；") : ""), result.failed.length > 0);
+          panel.remove();
+        } catch (error) { hint.textContent = "导出失败：" + error.message; }
+        finally { save.disabled = false; }
+      });
+      const footer = createElement(this.doc, "div", "zotagent-export-footer");
+      footer.append(cancel, save); panel.append(footer);
+      this.element.append(panel);
+      save.focus();
+    }
+
+    async exportPDFTexts(entries, destination) {
+      const folder = Zotero.File.pathToFile(destination);
+      const saved = [], failed = [];
+      for (const entry of entries) {
+        let output, reserved = false;
+        try {
+          const attachment = await preferredPDF(entry, entry === this.context);
+          if (!attachment) throw new Error("没有可用 PDF 附件");
+          const { text } = await extractPdfText(attachment);
+          if (!text) throw new Error("未提取到文本（扫描件可能需要 OCR）");
+          const item = entry.topItem;
+          const title = String(entry.title || item.getField("title") || "未命名");
+          const safe = Zotero.File.getValidFileName(title).slice(0, 100).replace(/[. ]+$/, "") || "文献";
+          output = folder.clone(); output.append(safe + ".md");
+          output.createUnique(Components.interfaces.nsIFile.NORMAL_FILE_TYPE, 0o644);
+          reserved = true;
+          const creators = (item.getCreators?.() || []).map(c => c.name || [c.firstName, c.lastName].filter(Boolean).join(" ")).join("; ");
+          const metadata = [`作者：${creators}`, `日期：${item.getField("date")}`, `DOI：${item.getField("DOI")}`, `Zotero Key：${item.key || ""}`];
+          await Zotero.File.putContentsAsync(output, `# ${title}\n\n${metadata.join("\n\n")}\n\n## PDF 提取文本\n\n${text}\n`);
+          saved.push(output.path);
+        } catch (error) {
+          if (reserved && output?.exists()) { try { output.remove(false); } catch {} }
+          failed.push(`${entry.title || "未命名"}：${error.message}`);
+        }
+      }
+      return { saved, failed };
     }
 
     renderExtraItems() {
@@ -1728,8 +1960,8 @@
     }
 
     selectedModel() {
-      // All agents use their native configuration by default. This remains an
-      // optional per-request override for existing users who configured it.
+      // An empty OpenCode preference asks Runtime to resolve the latest recent
+      // model; the other Agents continue using their native configuration.
       return this.agent === "opencode" ? String(pref("opencodeModel", "")).trim() || null : null;
     }
 
@@ -1865,9 +2097,8 @@
           const info = { title: entry.title || "未命名文献", documentKey: entry.topItem?.key, extractedChars: 0, state: "extracting" };
           request.fullTextAttachments.push(info);
           if (visible()) this.renderStatus("正在从 Zotero 提取 PDF 全文...");
-          // Preserve the existing separately-processed attachment lookup. The
-          // general library-view attachment selection remains outside scope.
-          const attachment = entry.attachment || (batch.separate && entry.topItem?.getAttachments?.()[0] ? Zotero.Items.get(entry.topItem.getAttachments()[0]) : null);
+          // Prefer the active main PDF and Zotero's preferred reference attachment.
+          const attachment = await preferredPDF(entry, entry.topItem?.id === batch.contexts[0]?.topItem?.id);
           const extracted = attachment ? await extractPdfText(attachment) : { text: "" };
           check();
           info.extractedChars = Array.from(extracted.text).length;
@@ -2379,6 +2610,13 @@
     destroy() {
       this.stop();
       this._destroyed = true;
+      this._contentObserver?.disconnect();
+      this._contentResizeObserver?.disconnect();
+      if (this._fitFrame) this.win.cancelAnimationFrame?.(this._fitFrame);
+      this.win.removeEventListener("resize", this._scheduleFit);
+      this.win.removeEventListener("pointerup", this._rememberManualSize);
+      this.win.removeEventListener("pointercancel", this._rememberManualSize);
+      this.win.removeEventListener("blur", this._rememberManualSize);
       this._archiveUnsubscribe?.();
       this._captureCleanup?.();
       this._terminalResizeObserver?.disconnect();
@@ -2778,6 +3016,11 @@
       for (const controller of controllers.values()) controller.destroy();
       controllers.clear();
       await Zotero.ZotAgent.archive?.drain();
+      // Release only the authenticated instance started by this plugin session.
+      if (runtimeProcesses.size && RuntimeManager._health?.service === "zotagent") {
+        try { await RuntimeManager.request("/v1/runtime/stop", { method: "POST", body: JSON.stringify({ instanceID: RuntimeManager._health.instanceID, force: true }) }); }
+        catch (error) { Zotero.debug("[ZotAgent] Runtime shutdown: " + error.message); }
+      }
       if (preferencePaneID && Zotero.PreferencePanes.unregister) {
         Zotero.PreferencePanes.unregister(preferencePaneID);
       }

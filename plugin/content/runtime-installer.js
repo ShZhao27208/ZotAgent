@@ -12,7 +12,11 @@
   function findNode() {
     const env = Services.env;
     const configured = Zotero.Prefs.get('extensions.zotagent.runtimeNodePath', true);
-    const candidates = [configured];
+    if (configured) {
+      try { const explicit = file(configured); if (explicit.exists() && explicit.isFile()) return explicit.path; } catch (_) {}
+      throw new Error('手动配置的 Node.js 路径无效：' + configured + '；请修正路径或清空后自动查找。');
+    }
+    const candidates = [];
     for (const base of [env.get('NVM_SYMLINK'), ...env.get('PATH').split(';'),
       env.get('ProgramW6432') + '\\nodejs', env.get('ProgramFiles') + '\\nodejs',
       env.get('LOCALAPPDATA') + '\\Programs\\nodejs', env.get('VOLTA_HOME') + '\\bin']) {
@@ -29,6 +33,13 @@
     try {
       const node = findNode();
       Zotero.Prefs.set('extensions.zotagent.runtimeNodePath', node, true);
+      const configuredScript = Zotero.Prefs.get('extensions.zotagent.runtimeScriptPath', true);
+      const managedBase = Zotero.DataDirectory.dir.replace(/[\\/]+$/, '') + '\\zotagent\\runtime\\';
+      if (configuredScript && !configuredScript.toLowerCase().replaceAll('/', '\\').startsWith(managedBase.toLowerCase())) {
+        const explicit = file(configuredScript);
+        if (!explicit.exists() || !explicit.isFile()) throw new Error('手动 Runtime 脚本路径无效：' + configuredScript + '；请修正或清空路径');
+        return { node, script: explicit.path };
+      }
       stage = '读取插件版本';
       const version = this._version;
       if (typeof version !== 'string' || !/^[0-9]+(?:\.[0-9]+){2}(?:[-+][a-z0-9.-]+)?$/i.test(version)) {

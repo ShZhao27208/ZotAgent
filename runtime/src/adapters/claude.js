@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { dirname } from "node:path";
 import { readFileSync } from "node:fs";
 import { AgentAdapter } from "./base.js";
 
@@ -19,18 +18,15 @@ export class ClaudeAdapter extends AgentAdapter {
     const sessionID = request.nativeSessionID || randomUUID();
     const args = [
       "--print",
-      "--input-format",
-      images.length ? "stream-json" : "text",
       "--output-format",
       "stream-json",
       "--verbose",
     ];
+    if (images.length) args.push("--input-format", "stream-json");
     if (request.nativeSessionID) args.push("--resume", sessionID);
     else args.push("--session-id", sessionID);
     if (request.model) args.push("--model", request.model);
-    for (const directory of new Set((request.files || []).map(dirname))) {
-      args.push("--add-dir", directory);
-    }
+    // Images are embedded as bytes; no directory access grant is required.
     return {
       command: this.executable,
       args,

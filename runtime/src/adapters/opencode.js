@@ -2,13 +2,13 @@ import { AgentAdapter } from "./base.js";
 
 export class OpenCodeAdapter extends AgentAdapter {
   buildInvocation(request) {
-    const args = ["run", "--format", "json", "--dir", request.cwd];
+    const args = ["run", "--format", "json"];
     if (request.nativeSessionID) {
       args.push("--session", request.nativeSessionID);
     }
     const model = String(request.model || "").trim();
     if (model) {
-      if (!/^[^\s/]+\/[^\s]+$/.test(model)) throw new Error("OpenCode 模型须填写 provider/model ID，例如 opencode/mimo-v2.6-flash-free；不能填写界面显示名称。请在相同环境运行 opencode models 核对，或留空使用 CLI 配置。");
+      if (!/^[^\s/]+\/[^\s]+$/.test(model)) throw new Error("OpenCode 模型须为 provider/model ID；请在设置中的模型下拉菜单重新选择。");
       args.push("--model", model);
     }
     if (request.agentMode) args.push("--agent", request.agentMode);
@@ -26,8 +26,7 @@ export class OpenCodeAdapter extends AgentAdapter {
   get supportsImages() { return true; }
 
   interactiveArgs(sessionID, cwd) {
-    // Top-level OpenCode uses the optional project positional argument. The
-    // --dir flag belongs to `run` and makes the TUI print help/exit 1.
-    return { args: [cwd], cwd };
+    // The process cwd already selects the project, in both structured and TUI modes.
+    return { args: [], cwd };
   }
 }

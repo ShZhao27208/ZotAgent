@@ -1012,3 +1012,36 @@
 .zotagent-terminal-info { flex: 0 0 auto; padding: 4px 10px; border-bottom: 1px solid var(--za-line); font-size: 11px; }
 .zotagent-terminal-info summary { cursor: pointer; color: var(--za-muted); }
 .zotagent-terminal-info div { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; max-height: 110px; overflow: auto; }
+
+/* Keep document actions distinct from full-text inclusion and analysis mode. */
+.zotagent-ref-bar { display: flex; flex-direction: column; align-items: stretch; gap: 7px; }
+.zotagent-document-actions, .zotagent-fulltext-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.zotagent-document-actions strong { margin-right: auto; color: var(--za-text); }
+.zotagent-primary-choice { display: inline-flex; align-items: center; gap: 4px; margin-right: auto; }
+.zotagent-primary-choice label { white-space: nowrap; }
+.zotagent-analysis-mode { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--za-muted); }
+/* Sibling overlay escapes the context region's 42% scroll-height restriction.
+   Only the document list scrolls, leaving the destination action visible. */
+.zotagent-dialog > .zotagent-pdf-export {
+  position: absolute; inset: 42px 0 0; z-index: 20;
+  display: flex; flex-direction: column; min-height: 0; padding: 16px;
+  box-sizing: border-box; background: var(--za-panel, #fff); color: var(--za-text, #173042);
+  border-top: 1px solid var(--za-line, #d5e1e8); overflow: hidden;
+}
+.zotagent-export-heading { flex: none; font-size: 15px; }
+.zotagent-export-hint { flex: none; margin: 6px 0 12px; color: var(--za-muted, #687f8f); font-size: 12px; }
+.zotagent-export-list { flex: 1; min-height: 0; overflow: auto; border-block: 1px solid var(--za-line, #d5e1e8); padding: 6px 0; }
+.zotagent-export-list label { display: flex; align-items: flex-start; gap: 8px; padding: 8px 4px; overflow-wrap: anywhere; }
+.zotagent-export-list input { flex: none; }
+.zotagent-export-footer { flex: none; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-top: 12px; }
+
+.zotagent-dialog.is-minimized > .zotagent-pdf-export { display: none; }
+
+/* Content-driven sizing keeps controls readable; overflow is confined to lists. */
+.zotagent-dialog { box-sizing: border-box; min-width: min(320px, calc(100vw - 24px)); min-height: min(420px, calc(100vh - 24px)); }
+.zotagent-context-details { max-height: var(--za-context-height, 55%); }
+.zotagent-extra-items { max-height: none; overflow: visible; }
+.zotagent-extra-item { flex-shrink: 0; align-items: flex-start; }
+.zotagent-extra-title { white-space: normal; overflow-wrap: anywhere; }
+.zotagent-dialog .zotagent-messages { min-width: 0; overflow-wrap: anywhere; }
+.zotagent-document-actions button, .zotagent-fulltext-actions button { flex-shrink: 0; }
