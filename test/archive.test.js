@@ -160,3 +160,20 @@ test('failed target selection restores the dropdown to the actual previous desti
   assert.equal(dialog.archiveSelect.value,original.noteKey);
   assert.match(dialog.statusElement.textContent,/无法切换归档笔记/);
 });
+
+test('question and answer are framed as separate 1x1 tables that keep boundaries and export as plain Markdown',()=>{
+  const f=fixture();
+  const record={id:'framed',agent:'codex',status:'completed',submittedAt:1,endedAt:2,question:'Q',answer:'A\n\n| X | Y |\n| --- | --- |\n| 1 | 2 |',
+    selection:'picked',selectionLabel:'p.3',primaryDocument:{title:'Paper',link:'zotero://select/library/items/KEY'}};
+  const doc=f.archive.parse(f.format.renderRecord(record,['IMG'],f.Zotero.ZotAgent.utils.markdownToNoteHTML));
+  const frames=[...f.format.noteBody(doc).children].filter(node=>node.localName==='table');
+  assert.equal(frames.length,2);
+  assert.match(frames[0].textContent,/问题[\s\S]*Q[\s\S]*picked/);
+  assert.ok(frames[0].querySelector('img[data-attachment-key="IMG"]'));
+  assert.match(frames[1].querySelector('h3').textContent,/回答/);
+  assert.ok(frames[1].querySelector('td table'));
+  assert.equal(f.format.recordsIn(doc).length,1);
+  const md=f.Zotero.ZotAgent.archiveExport.toMarkdown(doc);
+  assert.match(md,/^### .*问题/m);assert.match(md,/^### .*回答/m);assert.match(md,/^\| 1 \| 2 \|$/m);
+  assert.doesNotMatch(md,/<br>|^\| .*问题/m);
+});
