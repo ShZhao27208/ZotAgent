@@ -22,6 +22,9 @@
       }
       if (tag === "img") return `![${escape(node.getAttribute("alt") || "图片")}](${(node.getAttribute("src") || "").replaceAll(" ", "%20").replaceAll("(", "%28").replaceAll(")", "%29")})`;
       if (tag === "table") {
+        // Archive frames are 1x1 tables; a Markdown table would squash their headings and lists into one cell.
+        const ownRows = node.querySelectorAll(":scope > tr, :scope > * > tr");
+        if (ownRows.length === 1 && ownRows[0].children.length === 1) return "\n" + children(ownRows[0].children[0]).trim() + "\n\n";
         const rows = [...node.querySelectorAll("tr")].map(tr => [...tr.children].map(cell => children(cell).trim().replaceAll("|", "\\|").replace(/\n/g, "<br>")));
         if (!rows.length) return "";
         const width = Math.max(...rows.map(r => r.length));

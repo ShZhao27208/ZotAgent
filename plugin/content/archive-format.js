@@ -112,6 +112,8 @@
     const color = { codex: "#245fa5", "claude-code": "#8755a4", opencode: "#256d3f" }[record.agent] || "#245fa5";
     const badge = text => `<strong><span style="color: ${color}; background-color: #edf2f7">${escape(text)}</span></strong>`;
     const metadata = text => `<span style="color: #52677b">${escape(text)}</span>`;
+    // Zotero's note schema has no generic container, so a 1x1 table draws the border.
+    const frame = html => `<table><tbody><tr><td>${html}</td></tr></tbody></table>`;
     const source = (d, label) => d ? `<p>${badge(label + "：")}<a href="${escape(d.link)}">${escape(d.title)}</a>${escape([d.authors, d.year, d.doi && `DOI: ${d.doi}`].filter(Boolean).map(v => ` · ${v}`).join(""))}</p>` : "";
     const endLabel = record.status === "cancelled" ? "用户中断时间" : record.status === "completed" ? "回答完成时间" : "失败时间";
     return `<h2 id="zotagent-record-${meta}">${badge("Agent · " + (AGENTS[record.agent] || record.agent))} · ${escape(labels[record.status] || record.status)}</h2>`
@@ -119,11 +121,11 @@
       + source(record.primaryDocument, "主文献") + (record.references || []).map(d => source(d, "参考文献")).join("")
       + (record.targetDocument ? source(record.targetDocument, "本次分别处理文献") : "")
       + (record.fullTextAttachments || []).map(e => `<p>${escape(e.title)}<br/>${escape(fullTextDescription(e)).replaceAll("\n", "<br/>")}</p>`).join("")
-      + `<h3>${badge("问题")}</h3><p>${escape(record.question).replaceAll("\n", "<br/>")}</p>`
-      + (record.selection ? `<h3>选区${record.selectionLabel ? ` · ${escape(record.selectionLabel)}` : ""}</h3>${source(record.selectionDocument, "选区来源")}<p>${escape(record.selection).replaceAll("\n", "<br/>")}</p>` : "")
-      + imageKeys.map(key => `<p><img data-attachment-key="${escape(key)}" alt="本次提问的 PDF 截图"/></p>`).join("")
-      + `<h3>${badge("回答 · " + (AGENTS[record.agent] || record.agent))}</h3>${record.answer ? markdown(record.answer) : "<p>尚未收到具体回答。</p>"}`
-      + (record.failureSummary ? `<p>说明：${escape(record.failureSummary)}</p>` : "")
+      + frame(`<h3>${badge("问题")}</h3><p>${escape(record.question).replaceAll("\n", "<br/>")}</p>`
+        + (record.selection ? `<h3>选区${record.selectionLabel ? ` · ${escape(record.selectionLabel)}` : ""}</h3>${source(record.selectionDocument, "选区来源")}<p>${escape(record.selection).replaceAll("\n", "<br/>")}</p>` : "")
+        + imageKeys.map(key => `<p><img data-attachment-key="${escape(key)}" alt="本次提问的 PDF 截图"/></p>`).join(""))
+      + frame(`<h3>${badge("回答 · " + (AGENTS[record.agent] || record.agent))}</h3>${record.answer ? markdown(record.answer) : "<p>尚未收到具体回答。</p>"}`
+        + (record.failureSummary ? `<p>说明：${escape(record.failureSummary)}</p>` : ""))
       + `<h6 id="zotagent-end-${escape(record.id)}">记录结束</h6>`;
   }
   function noteBody(doc) { return doc.body.querySelector(":scope > div[data-schema-version], :scope > div.zotero-note") || doc.body; }
