@@ -151,7 +151,8 @@
           this._health = health;
           if ((health.platform || health.shell?.platform) !== this.desiredPlatform()) return "wrong-environment";
           if (this.desiredPlatform() === "wsl" && health.wslDistro && health.wslDistro !== String(pref("wslDistro", "Ubuntu"))) return "wrong-environment";
-          if (Number(health.protocolVersion || 0) < 6) return "outdated";
+          if (Number(health.protocolVersion || 0) < 7) return "outdated";
+          if (Zotero.ZotAgent._runtimeBuildID && health.buildID !== Zotero.ZotAgent._runtimeBuildID) return "outdated";
           const incorrectHomeCase = health.cwdExists === false && cwd.toLowerCase() === health.defaultCwd?.toLowerCase();
           if ((!cwd || incorrectHomeCase || (Zotero.isWin && pref("runtimeHost", "auto") !== "wsl" && cwd.startsWith("/"))) && health.defaultCwd && (/^[a-z]:[\\/]/i.test(health.defaultCwd) || health.defaultCwd.startsWith("/"))) {
             setPref("defaultWorkingDirectory", health.defaultCwd);
@@ -902,7 +903,6 @@
       try {
         check();
         await RuntimeManager.ensureRunning(); check();
-        await this.syncAgentPaths(); check();
         const body = JSON.stringify(payload);
         if (new TextEncoder().encode(body).byteLength > 4 * 1024 * 1024) throw new Error("请求体超过 Runtime 的 4 MiB 接收限制；未主动截断全文或截图，请减少附加文献或图片");
         timeout = setTimeout(() => { op.timedOut = true; op.controller?.abort(); }, 10000);
@@ -926,6 +926,7 @@
             event.data = { ...event.data, message: failure };
           }
           if (event.type === "request.completed") completion = event;
+          if (event.type === "request.preparing") this.dialog?.renderStatus(event.data?.message || "正在准备 Agent 和模型…");
           check(); onEvent(event);
         };
         while (true) {
@@ -941,7 +942,7 @@
           error: failure || (completion.data.code !== 0 ? `退出码 ${completion.data.code}: ${completion.data.stderr || "Agent 未成功完成"}` : "") };
       } catch (error) {
         if (op.cancelled) { const cancelled = new Error("用户已中断"); cancelled.name = "AbortError"; throw cancelled; }
-        if (op.timedOut) throw new Error("连接超时：请确认 Runtime Host 已启动");
+        if (op.timedOut) throw new Error("Runtime 未在 10 秒内返回响应头：请检查连接或更新后端（不代表 Agent 未启动）");
         throw error;
       } finally {
         clearTimeout(timeout);

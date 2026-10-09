@@ -6,9 +6,9 @@
 
 将 **Codex · Claude Code · OpenCode** 接入 Zotero，随读随问、对照分析、沉淀记录。
 
-[下载安装](https://github.com/ShZhao27208/ZotAgent/releases) · [功能一览](#功能一览) · [开始使用](#开始使用) · [版本说明](docs/RELEASE-0.5.0.md)
+[下载安装](https://github.com/ShZhao27208/ZotAgent/releases) · [功能一览](#功能一览) · [开始使用](#开始使用) · [版本说明](docs/RELEASE-0.5.1.md)
 
-当前版本 **0.5.0** · 开发预览版 · 主要面向 Windows / WSL
+当前版本 **0.5.1** · 开发预览版 · 主要面向 Windows / WSL
 
 </div>
 
@@ -54,7 +54,7 @@ ZotAgent 是面向学术阅读与研究工作的 **Zotero Agent 工作台**。
 - 输入框改为 Enter 发送、Shift+Enter 换行，保护中文输入法确认操作。
 - 增加内容尺寸适配，并修复自动布局与手动缩放相互触发造成的震荡，手动尺寸保持优先。
 
-验证：161 项回归测试中 160 项通过，1 项 Windows 专用测试在 Linux/WSL 跳过；构建与安装包一致性检查通过。本机 OpenCode 使用 `opencode/space-bunny-free` 完成真实最小问答。Windows Zotero 的实际交互仍需按[版本说明](docs/RELEASE-0.5.0.md)复验。
+验证：161 项回归测试中 160 项通过，1 项 Windows 专用测试在 Linux/WSL 跳过；构建与安装包一致性检查通过。本机 OpenCode 使用 `opencode/space-bunny-free` 完成真实最小问答。Windows Zotero 的实际交互仍需按[版本说明](docs/RELEASE-0.5.1.md)复验。
 
 ## 功能一览
 
@@ -202,7 +202,7 @@ opencode --version
 
 ### 2. 安装插件
 
-1. 从 [Releases](https://github.com/ShZhao27208/ZotAgent/releases) 下载所需版本的 `zotagent-<版本>.xpi`。0.5.0 安装包可从当前源码运行 `npm run build` 生成，输出为 `dist/zotagent-0.5.0.xpi`；GitHub Release 附件以 Releases 页面实际内容为准。
+1. 从 [Releases](https://github.com/ShZhao27208/ZotAgent/releases) 下载所需版本的 `zotagent-<版本>.xpi`。0.5.1 安装包可从当前源码运行 `npm run build` 生成，输出为 `dist/zotagent-0.5.1.xpi`；GitHub Release 附件以 Releases 页面实际内容为准。
 2. 在 Zotero 中打开 **工具 → 插件**，通过菜单选择 **从文件安装插件**。
 3. 选择 XPI，安装后重启 Zotero。
 4. 进入 **Zotero → 设置 → ZotAgent**，点击 **连接并检测**。
@@ -375,7 +375,9 @@ Runtime 默认监听本机 `127.0.0.1:24119`，使用自动生成的 Token 鉴�
 
 设置页提供启动、停止、重启按钮，显示端口与 PID。有任务时停止前确认；手动停止后本次 Zotero 会话不自动拉起。只停止通过 Token 和实例 ID 校验的 ZotAgent 服务，不按端口杀未知进程。协议 5 等旧版服务没有停止接口，需从原启动终端退出一次。
 
-更新后若仍使用旧行为，退出 Zotero，停止对应端口上的旧 Runtime，安装新 XPI 后重启。手动启动的外置 Runtime 也需更新脚本并重启；0.5.0 要求 Runtime 协议 6。不要在反馈中公开 Token。
+内置 Runtime 按“插件版本＋源码构建指纹”隔离部署；即使安装相同版本但 Runtime 源码不同，也不会复用旧部署目录。连接检测同时核对协议与指纹，不只检查端口是否能访问。旧服务可认证且空闲时安全停止并替换；有任务则提示先停止。自定义外置 Runtime 需更新到与安装包匹配的源码。
+
+更新后若仍使用旧行为，退出 Zotero，停止对应端口上的旧 Runtime，安装新 XPI 后重启。手动启动的外置 Runtime 也需更新脚本并重启；0.5.1 要求 Runtime 协议 7，并核对源码构建指纹。不要在反馈中公开 Token。
 
 </details>
 
@@ -383,6 +385,10 @@ Runtime 默认监听本机 `127.0.0.1:24119`，使用自动生成的 Token 鉴�
 <summary><strong>Agent 检测失败，或 OpenCode 默认模型报错</strong></summary>
 
 先在所选环境直接执行对应 CLI 的 `--version`，确认路径有效。Windows 与 WSL 是不同安装环境，不能仅凭另一边能运行就认为当前配置可用。
+
+0.5.1 修复了 Windows 上模型准备超过 10 秒时误报“Runtime 未启动”的问题：连接建立后立即显示准备状态，慢查询不会阻塞响应头；失败返回带请求标识的错误和完成事件。准备期间可以停止或关闭连接，后端不会在断线后继续启动 Agent。
+
+模型目录在同一运行环境内缓存 5 分钟，并发窗口共享查询；菜单旁“刷新”会重新拉取。最近使用的模型记录仍每次读取，显式选定模型时跳过最近记录查询。每条查询最多等待 45 秒，超时会报告具体命令；不会自动换模型重试。
 
 OpenCode 模型改为下拉选择真实 ID。打开设置、检测连接、打开菜单和切换环境时读取当前安装的模型列表；模型菜单旁的“刷新”按钮同时更新 CLI 模型缓存。刷新失败保留原选择，已下架的模型明确标记。
 
@@ -426,6 +432,6 @@ npm run verify
 | `scripts/` | 构建、校验与版本历史维护。 |
 | `docs/` | 设计、版本说明与验证记录。 |
 
-[当前版本说明](docs/RELEASE-0.5.0.md) · [版本与推送历史](docs/VERSION-HISTORY.md) · [问题反馈](https://github.com/ShZhao27208/ZotAgent/issues)
+[当前版本说明](docs/RELEASE-0.5.1.md) · [版本与推送历史](docs/VERSION-HISTORY.md) · [问题反馈](https://github.com/ShZhao27208/ZotAgent/issues)
 
 项目目前未附带开源许可证，代码使用与分发权限以仓库后续明确提供的许可证为准。

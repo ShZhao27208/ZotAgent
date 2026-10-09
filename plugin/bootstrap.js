@@ -41,6 +41,7 @@ async function startup({ rootURI, version }) {
   );
   Zotero.ZotAgent._rootURI = rootURI;
   Zotero.ZotAgent._version = version;
+  Services.scriptloader.loadSubScript(rootURI + "content/runtime-build.js", context);
   Services.scriptloader.loadSubScript(rootURI + "content/runtime-installer.js", context);
   // Zotero may await bootstrap before finishing the item tree. Do not block
   // plugin initialization on uiReadyPromise.

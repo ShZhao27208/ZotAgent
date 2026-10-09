@@ -9,6 +9,7 @@ const manifest = JSON.parse(await fs.readFile(path.join(root, "plugin/manifest.j
 const required = [
   "plugin/bootstrap.js",
   "plugin/content/runtime-installer.js",
+  "plugin/content/runtime-build.js",
   "plugin/prefs.js",
   "plugin/content/zot-agent.js",
   "plugin/content/preferences.xhtml",
@@ -23,6 +24,7 @@ for (const file of required) await fs.access(path.join(root, file));
 const scripts = [
   "plugin/bootstrap.js",
   "plugin/content/runtime-installer.js",
+  "plugin/content/runtime-build.js",
   "plugin/content/zot-agent.js",
   "plugin/content/preferences.js",
   "plugin/content/archive-format.js",
@@ -32,6 +34,8 @@ const scripts = [
   "runtime/src/normalize.js",
   "runtime/src/agent-launch.js",
   "runtime/src/opencode-models.js",
+  "runtime/src/runtime-identity.js",
+  "runtime/src/protocol.js",
   "runtime/src/config.js",
   "runtime/src/adapters/opencode.js",
   "runtime/src/adapters/claude.js",
@@ -53,7 +57,9 @@ for (const script of scripts.filter(name => name.startsWith("plugin/"))) {
   if (!entries.get(script.slice(7))?.equals(source)) throw new Error(`Stale XPI source: ${script}`);
 }
 const runtime = unzip(entries.get("runtime.zip"));
-for (const name of ["src/index.js", "src/opencode-models.js", "src/normalize.js", "src/agent-launch.js", "src/config.js", "src/adapters/claude.js", "src/adapters/codex.js", "src/adapters/opencode.js", "src/pty-manager.js"]) {
+const { runtimeBuildID } = await import("../runtime/src/runtime-identity.js");
+if (!entries.get("content/runtime-build.js").toString().includes(runtimeBuildID())) throw new Error("Stale Runtime build identity");
+for (const name of ["src/index.js", "src/runtime-identity.js", "src/protocol.js", "src/opencode-models.js", "src/normalize.js", "src/agent-launch.js", "src/config.js", "src/adapters/claude.js", "src/adapters/codex.js", "src/adapters/opencode.js", "src/pty-manager.js"]) {
   if (!runtime.get(name)?.equals(await fs.readFile(path.join(root, "runtime", name)))) throw new Error(`Stale Runtime source: ${name}`);
 }
 for (const arch of ["x64", "arm64"]) {

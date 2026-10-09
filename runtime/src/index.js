@@ -39,6 +39,8 @@ import { createAgentLauncher, agentPlatform, nativePlatform, pathMatchesPlatform
 
 import { createModelCatalog, selectModel } from "./opencode-models.js";
 
+import { runtimeBuildID } from "./runtime-identity.js";
+const buildID = runtimeBuildID();
 const config = loadConfig();
 if (process.platform === "win32") {
   const { dirname, delimiter } = await import("node:path");
@@ -46,6 +48,7 @@ if (process.platform === "win32") {
 }
 let adapters = createAdapters(config.executables, config.platforms);
 const running = new Map();
+const preparing = new Map();
 const launcher = createAgentLauncher(config);
 const modelCatalog = createModelCatalog(launcher);
 const instanceID = randomUUID();
@@ -106,24 +109,60 @@ function terminateProcess(child) {
 function assertSessionIdle(agent, nativeSessionID, resumePicker = false) {
   // A native picker can select any session and does not report its selection.
   // Reserve this Agent while it is open so another window cannot write to it.
-  const active = [...running.values()].some(entry => entry.request.agent === agent && (resumePicker || nativeSessionID && entry.request.nativeSessionID === nativeSessionID));
+  const active = [...running.values(), ...preparing.values()].some(entry => entry.request.agent === agent && (resumePicker || nativeSessionID && entry.request.nativeSessionID === nativeSessionID));
   const terminal = listPtySessions().some(session => session.alive && session.agent === agent && (resumePicker || session.resumePicker || nativeSessionID && session.nativeSessionID === nativeSessionID));
   if (active || terminal) throw new Error("该会话仍在执行、停止中或已在原生终端打开，请等待任务退出或先关闭原生终端");
 }
 
-async function runAgent(request, response) {
-  const location = await launcher.resolve(request.agent);
-  if (response.destroyed || response.writableEnded) return;
+async function prepareAndRun(request, response) {
+  if (running.has(request.requestID) || preparing.has(request.requestID)) throw new Error("重复的 requestID");
   assertSessionIdle(request.agent, request.nativeSessionID);
+  const controller = new AbortController();
+  const entry = { request, controller };
+  preparing.set(request.requestID, entry);
+  const cancel = () => controller.abort(new Error("请求已取消或连接断开"));
+  response.once("close", cancel);
+  try {
+    startNDJSON(response);
+    writeEvent(response, envelope(request, "request.preparing", { message: "Runtime 已连接，正在准备 Agent 和模型" }));
+    await runAgent(request, response, controller.signal);
+  }
+  catch (error) {
+    writeEvent(response, envelope(request, "error", { message: error.message }));
+    writeEvent(response, envelope(request, "request.completed", { code: 1, stderr: error.message }));
+    if (!response.writableEnded) response.end();
+  } finally {
+    if (preparing.get(request.requestID) === entry) preparing.delete(request.requestID);
+    response.removeListener("close", cancel);
+  }
+}
+
+async function runAgent(request, response, signal) {
+  const check = () => {
+    signal.throwIfAborted();
+    if (stopping || response.destroyed || response.writableEnded) throw new Error("请求已停止或连接断开");
+  };
+  check();
+  let abortResolve;
+  const location = await Promise.race([
+    launcher.resolve(request.agent),
+    new Promise((_, reject) => {
+      abortResolve = () => reject(signal.reason);
+      signal.addEventListener("abort", abortResolve, { once: true });
+      if (signal.aborted) abortResolve();
+    }),
+  ]).finally(() => signal.removeEventListener("abort", abortResolve));
+  check();
   if (location.platform === "wsl" && process.platform === "win32") {
     request.cwd = request.cwd === config.defaultCwd ? location.defaultCwd : toWSLPath(request.cwd);
     if (!request.cwd.startsWith("/")) request.cwd = location.defaultCwd;
   } else if (!pathMatchesPlatform(request.cwd, location.platform)) request.cwd = location.defaultCwd;
   if (request.agent === "opencode") {
-    const catalog = await modelCatalog(location);
+    const catalog = await modelCatalog(location, false, { signal, recent: !request.model });
+    check();
     request.model = selectModel(catalog.models, request.model, catalog.recent, catalog.recentError);
   }
-  if (stopping) throw new Error("Runtime 正在停止");
+  check();
   const ownedFiles = new Set();
   const cleanup = () => {
     for (const file of ownedFiles) { try { unlinkSync(file); } catch {} }
@@ -149,7 +188,6 @@ async function runAgent(request, response) {
     request.nativeSessionID = invocation.nativeSessionID;
   }
 
-  startNDJSON(response);
   writeEvent(response, envelope(request, "request.started", {
     cwd: request.cwd,
     nativeSessionID: request.nativeSessionID,
@@ -194,6 +232,7 @@ async function runAgent(request, response) {
     }
   };
   const extractVisibleText = createTextExtractor(request.agent);
+  preparing.delete(request.requestID);
   running.set(request.requestID, { child, request, response });
 
   const stdout = createInterface({ input: child.stdout });
@@ -340,15 +379,23 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/v1/runtime/stop") {
       const body = await readJSON(request);
       if (body.instanceID !== instanceID) { writeJSON(response, 409, { error: "Runtime 实例已改变，请重新检测" }); return; }
-      if (!body.force && (running.size || listPtySessions().some(s => s.alive))) { writeJSON(response, 409, { error: "有新任务正在运行，请重新确认停止" }); return; }
+      if (!body.force && (running.size || preparing.size || listPtySessions().some(s => s.alive))) { writeJSON(response, 409, { error: "有新任务正在运行，请重新确认停止" }); return; }
       stopping = true;
       writeJSON(response, 202, { status: "stopping" });
       setImmediate(shutdown); return;
     }
     if (stopping) { writeJSON(response, 503, { error: "Runtime 正在停止" }); return; }
     if (request.method === "GET" && url.pathname === "/v1/opencode/models") {
-      const location = await launcher.resolve("opencode");
-      writeJSON(response, 200, await modelCatalog(location, url.searchParams.get("refresh") === "1")); return;
+      const controller = new AbortController();
+      const cancel = () => controller.abort(new Error("模型菜单已断开"));
+      response.once("close", cancel);
+      try {
+        const location = await launcher.resolve("opencode");
+        controller.signal.throwIfAborted();
+        const result = await modelCatalog(location, url.searchParams.get("refresh") === "1", { signal: controller.signal });
+        if (!response.destroyed) writeJSON(response, 200, result);
+      } finally { response.removeListener("close", cancel); }
+      return;
     }
     if (request.method === "GET" && url.pathname === "/v1/health") {
       let cwdExists = null;
@@ -359,15 +406,17 @@ const server = http.createServer(async (request, response) => {
       }
       writeJSON(response, 200, {
         status: "ok",
-        protocolVersion: 6,
+        protocolVersion: 7,
+        runtimeVersion: "0.5.1", buildID,
         service: "zotagent", instanceID,
-        activeRequests: [...running.values()].map(({ request }) => ({ agent: request.agent, requestID: request.requestID })),
+        activeRequests: [...running.values(), ...preparing.values()].map(({ request }) => ({ agent: request.agent, requestID: request.requestID })),
         activeTerminals: listPtySessions().filter(s => s.alive).map(s => ({ agent: s.agent, id: s.id })),
         platform: nativePlatform,
         wslDistro: process.env.WSL_DISTRO_NAME || null,
         cwdExists,
         pid: process.pid,
-        runningRequests: running.size,
+        runningRequests: running.size + preparing.size,
+        preparingRequests: preparing.size,
         defaultCwd: config.defaultCwd,
         shell: config.shell,
       });
@@ -402,8 +451,9 @@ const server = http.createServer(async (request, response) => {
           next.executables[name] = value;
         }
       }
+      const changed = JSON.stringify([config.executables, config.platforms, config.wslDistro]) !== JSON.stringify([next.executables, next.platforms, next.wslDistro]);
       Object.assign(config, next);
-      launcher.clear();
+      if (changed) { launcher.clear(); modelCatalog.clear(); }
       adapters = createAdapters(config.executables, config.platforms);
       writeJSON(response, 200, {
         status: "updated",
@@ -415,12 +465,17 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (request.method === "POST" && url.pathname === "/v1/run") {
-      await runAgent(validateRunRequest(await readJSON(request)), response);
+      await prepareAndRun(validateRunRequest(await readJSON(request)), response);
       return;
     }
     const cancelMatch = url.pathname.match(/^\/v1\/requests\/([^/]+)\/cancel$/);
     if (request.method === "POST" && cancelMatch) {
       const requestID = decodeURIComponent(cancelMatch[1]);
+      const pending = preparing.get(requestID);
+      if (pending) {
+        pending.controller.abort(new Error("用户已中断模型准备"));
+        writeJSON(response, 202, { status: "cancelling", requestID }); return;
+      }
       const active = running.get(requestID);
       if (!active) {
         writeJSON(response, 404, { error: "request not found" });
@@ -563,6 +618,8 @@ server.listen(config.port, config.host, () => {
 function shutdown() {
   stopping = true;
   setTimeout(() => { server.closeAllConnections(); process.exit(0); }, 2500).unref();
+  for (const { controller } of preparing.values()) controller.abort(new Error("Runtime 正在停止"));
+  modelCatalog.clear();
   for (const { child } of running.values()) terminateProcess(child);
   for (const session of listPtySessions()) closePtySession(session.id);
   server.close(() => process.exit(0));

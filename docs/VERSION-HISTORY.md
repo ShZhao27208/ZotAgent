@@ -2,9 +2,9 @@
 
 > 本文件记录本地可见的 Git 历史（含推送前待发布提交），不代表 GitHub 每次 push 的事件日志。推送前 hook 自动更新本地历史；实际推送成功后在文末独立记录，可随下一批修改提交。
 
-- 历史截至：2026-09-26T04:50:13+08:00
+- 历史截至：2026-10-08T11:30:57+08:00
 - 项目：`ShZhao27208/ZotAgent`
-- 可见提交：60 个（按 Git 提交时间升序）
+- 可见提交：61 个（按 Git 提交时间升序）
 - 时间：ISO 8601，带时区
 
 ## 远端分支与标签
@@ -121,6 +121,7 @@
 | 58 | 2026-09-26T02:59:34+08:00 | `0.4.3` | `9804bfd` | feat: select archive notes and restore native agent sessions v0.4.3 |
 | 59 | 2026-09-26T03:53:01+08:00 | `0.4.4` | `6983166` | fix: show structured sessions in native resume pickers v0.4.4 |
 | 60 | 2026-09-26T04:50:13+08:00 | `0.4.4` | `e4072da` | docs: rewrite README around research workflow and setup |
+| 61 | 2026-10-08T11:30:57+08:00 | `0.5.0` | `2fbde93` | feat: improve agent compatibility, PDF tools and adaptive UI v0.5.0 |
 
 ## 维护规则
 
@@ -200,3 +201,13 @@
 - 内容：README 按项目定位、优势、功能、使用方法重新组织；补全全文、多文献、多窗口、截图、笔记写回、共享自动归档和命名模板；整理 Windows/WSL 配置及恢复命令，修正旧版本说明。随提交纳入上批次 0.4.4 实际发布记录。
 - 验证：本地文档链接、目录锚点、代码围栏、折叠区及 diff 格式检查通过；pre-push 安装包一致性校验通过。纯文档变更，未重新运行功能测试、构建或创建版本标签。
 - 本条为推送后的本地记录，留待下一完整批次提交，不为记录自身再次推送。
+
+### 0.5.0 — OpenCode 兼容、PDF 工具和界面适配
+
+- 核对时间：2026-10-08T11:31:07+08:00。
+- 提交：`2fbde93ec8b7fe3a608514b65f18ea662d6a3d16`。
+- 分支：`fix/auto-detect-runtime-and-cli-paths`；已推送 origin，`git ls-remote` 核对远端 HEAD 一致。
+- 本轮全部源码、测试、README 和版本说明合为一次提交；未创建 GitHub Release。
+- 验证：161 项，160 通过，1 项 Windows 专用测试跳过；安装包一致性及 diff 检查通过。
+- 安装包：`dist/zotagent-0.5.0.xpi`，14089845 字节，SHA-256 `fbc215133f7b372079976f014973d2f8d317a028eb7b9dd8e631f358109809ee`。
+- 此条为推送成功后的本地记录，留待下一批修改纳入，不为记录自身再次提交。

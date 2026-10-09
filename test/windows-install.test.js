@@ -116,3 +116,10 @@ test('invalid manual Runtime script is preserved instead of deploying over it',a
   await assert.rejects(f.plugin.prepareWindowsRuntime(),/手动 Runtime 脚本路径无效/);
   assert.equal(f.prefs.get('extensions.zotagent.runtimeScriptPath'),'C:\\custom\\index.js');assert.equal(f.archives(),0);
 });
+
+test('same plugin version with changed Runtime fingerprint deploys to a fresh directory',async()=>{
+  const f=fixture();f.plugin._runtimeBuildID='a'.repeat(64);
+  const first=await f.plugin.prepareWindowsRuntime();await f.plugin.prepareWindowsRuntime();assert.equal(f.archives(),1);
+  f.plugin._runtimeBuildID='b'.repeat(64);const second=await f.plugin.prepareWindowsRuntime();
+  assert.notEqual(first.script,second.script);assert.ok(second.script.includes('0.3.9-'+'b'.repeat(64)));assert.equal(f.archives(),2);
+});

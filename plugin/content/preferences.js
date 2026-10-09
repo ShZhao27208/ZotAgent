@@ -67,7 +67,7 @@
     const originalEnvironment = environment();
     try {
       await Zotero.ZotAgent.runtimeManager.ensureRunning();
-      const response = await Zotero.ZotAgent.runtimeManager.request("/v1/opencode/models" + (force ? "?refresh=1" : ""), {}, 65000);
+      const response = await Zotero.ZotAgent.runtimeManager.request("/v1/opencode/models" + (force ? "?refresh=1" : ""), {}, 155000);
       const data = await response.json();
       if (environment() !== originalEnvironment) return;
       if (!response.ok) throw new Error(data.error || `Runtime ${response.status}`);

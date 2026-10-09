@@ -6,6 +6,8 @@ const root = path.resolve(import.meta.dirname, "..");
 const buildDir = path.join(root, "build");
 const distDir = path.join(root, "dist");
 const pluginSource = path.join(root, "plugin");
+const { runtimeBuildID } = await import("../runtime/src/runtime-identity.js");
+await fs.writeFile(path.join(pluginSource, "content/runtime-build.js"), `Zotero.ZotAgent._runtimeBuildID = ${JSON.stringify(runtimeBuildID())};\n`);
 const pluginBuild = path.join(buildDir, "plugin");
 
 if (process.argv.includes("--clean")) {

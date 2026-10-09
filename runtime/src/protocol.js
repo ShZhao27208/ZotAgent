@@ -34,12 +34,14 @@ export function writeJSON(response, status, body) {
 }
 
 export function startNDJSON(response) {
+  if (response.headersSent) return;
   response.writeHead(200, {
     "content-type": "application/x-ndjson; charset=utf-8",
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
     "access-control-allow-origin": "*",
   });
+  response.flushHeaders();
 }
 
 export function writeEvent(response, event) {

@@ -47,11 +47,14 @@
       }
       stage = '创建本机 Runtime 目录';
       const base = directory(directory(file(Zotero.DataDirectory.dir), 'zotagent'), 'runtime');
-      const target = directory(base, version);
+      const buildID = this._runtimeBuildID;
+      if (buildID && !/^[a-f0-9]{64}$/.test(buildID)) throw new Error('无效 Runtime 构建标识');
+      const deployment = buildID ? version + '-' + buildID : version;
+      const target = directory(base, deployment);
       const marker = target.clone(); marker.append('.complete');
       if (!marker.exists()) {
         stage = '从本地插件提取 Runtime 包';
-        const archive = base.clone(); archive.append('runtime-' + version + '.zip');
+        const archive = base.clone(); archive.append('runtime-' + deployment + '.zip');
         // This is a local XPI resource, not an HTTP download. Zotero's download
         // helper can read URI credentials, which jar: URIs do not support.
         if (archive.exists()) archive.remove(false);
