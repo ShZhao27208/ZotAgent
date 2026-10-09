@@ -2,9 +2,9 @@
 
 > 本文件记录本地可见的 Git 历史（含推送前待发布提交），不代表 GitHub 每次 push 的事件日志。推送前 hook 自动更新本地历史；实际推送成功后在文末独立记录，可随下一批修改提交。
 
-- 历史截至：2026-10-09T17:21:57+08:00
+- 历史截至：2026-10-09T20:51:24+08:00
 - 项目：`ShZhao27208/ZotAgent`
-- 可见提交：62 个（按 Git 提交时间升序）
+- 可见提交：67 个（按 Git 提交时间升序）
 - 时间：ISO 8601，带时区
 
 ## 远端分支与标签
@@ -123,6 +123,11 @@
 | 60 | 2026-09-26T04:50:13+08:00 | `0.4.4` | `e4072da` | docs: rewrite README around research workflow and setup |
 | 61 | 2026-10-08T11:30:57+08:00 | `0.5.0` | `2fbde93` | feat: improve agent compatibility, PDF tools and adaptive UI v0.5.0 |
 | 62 | 2026-10-09T17:21:57+08:00 | `0.5.1` | `e790952` | fix: handle slow OpenCode preparation and verify Runtime builds v0.5.1 |
+| 63 | 2026-10-09T18:43:02+08:00 | `0.5.1` | `8a9bdfc` | fix: prevent orphan terminals, repeated agent detection and slow model lookups |
+| 64 | 2026-10-09T18:43:02+08:00 | `0.5.1` | `e704d31` | test: cover orphan terminals, detection reuse and persisted model list |
+| 65 | 2026-10-09T18:43:45+08:00 | `0.6.0` | `def01d5` | chore: release v0.6.0 |
+| 66 | 2026-10-09T20:51:24+08:00 | `0.6.0` | `9b91577` | feat: frame archived questions and answers in notes |
+| 67 | 2026-10-09T20:51:24+08:00 | `0.6.0` | `2cd6223` | test: cover framed archive records and Markdown export |
 
 ## 维护规则
 

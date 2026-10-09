@@ -409,7 +409,7 @@ const server = http.createServer(async (request, response) => {
       writeJSON(response, 200, {
         status: "ok",
         protocolVersion: 7,
-        runtimeVersion: "0.6.0", buildID,
+        runtimeVersion: "0.6.1", buildID,
         service: "zotagent", instanceID,
         activeRequests: [...running.values(), ...preparing.values()].map(({ request }) => ({ agent: request.agent, requestID: request.requestID })),
         activeTerminals: listPtySessions().filter(s => s.alive).map(s => ({ agent: s.agent, id: s.id })),
