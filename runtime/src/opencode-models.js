@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { statSync } from 'node:fs';
+import { statSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { nativePlatform } from './agent-launch.js';
@@ -18,8 +18,27 @@ export function selectModel(models, selected, recent, error) {
   if (!models.includes(model)) throw new Error(`OpenCode 模型 ${model} 不在当前可用列表中；请刷新设置中的模型下拉菜单并重新选择。`);
   return model;
 }
-export function createModelCatalog(launcher) {
-  const cache = new Map(), pending = new Map();
+function loadStore(storePath) {
+  if (!storePath) return new Map();
+  try {
+    const entries = Object.entries(JSON.parse(readFileSync(storePath, 'utf8')).catalogs || {});
+    return new Map(entries.filter(([, v]) => Array.isArray(v?.models) && v.models.length && Number.isFinite(v.at))
+      .map(([key, v]) => [key, { models: v.models.map(String), at: v.at, state: typeof v.state === 'string' ? v.state : undefined }]));
+  } catch { return new Map(); }
+}
+function saveStore(storePath, cache) {
+  if (!storePath) return;
+  try {
+    mkdirSync(path.dirname(storePath), { recursive: true });
+    const tmp = `${storePath}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify({ catalogs: Object.fromEntries(cache) }));
+    renameSync(tmp, storePath);
+  } catch {}
+}
+export function createModelCatalog(launcher, { storePath = null } = {}) {
+  // A persisted list lets the first message after a restart skip the 15-40 s
+  // `opencode models` call; expired entries are served while refreshing.
+  const cache = loadStore(storePath), pending = new Map();
   const ttl = 5 * 60 * 1000;
   async function command(location, args, signal) {
     signal?.throwIfAborted();
@@ -85,21 +104,22 @@ export function createModelCatalog(launcher) {
       if (signal?.aborted) abort();
     });
   }
-  async function catalog(location, refresh = false, { signal, recent: needRecent = true } = {}) {
+  async function catalog(location, refresh = false, { signal, recent: needRecent = true, model = null } = {}) {
     signal?.throwIfAborted();
     let stamp = '';
     if (location.platform === nativePlatform) { try { const st = statSync(location.executable); stamp = `${st.size}:${st.mtimeMs}`; } catch {} }
     const key = JSON.stringify([location.platform, location.distro, location.executable, location.defaultCwd, stamp]);
-    let value = cache.get(key);
-    if (refresh || !value || Date.now() - value.at > ttl) {
-      value = await shared(key + ':models:' + refresh, async innerSignal => {
-        const models = parseModels(await command(location, refresh ? ['models', '--refresh'] : ['models'], innerSignal));
-        innerSignal.throwIfAborted();
-        if (!models.length) throw new Error('OpenCode 没有返回可用模型 ID，请检查安装、网络或登录状态');
-        const result = { models, at: Date.now(), state: undefined };
-        cache.set(key, result); return result;
-      }, signal);
-    }
+    const load = (force, loadSignal) => shared(key + ':models:' + force, async innerSignal => {
+      const models = parseModels(await command(location, force ? ['models', '--refresh'] : ['models'], innerSignal));
+      innerSignal.throwIfAborted();
+      if (!models.length) throw new Error('OpenCode 没有返回可用模型 ID，请检查安装、网络或登录状态');
+      const result = { models, at: Date.now(), state: force ? undefined : cache.get(key)?.state };
+      cache.set(key, result); saveStore(storePath, cache); return result;
+    }, loadSignal);
+    let value = cache.get(key), fresh = false;
+    // A model chosen after the cached list was built must not be rejected as stale.
+    if (refresh || !value || (model && !value.models.includes(model))) { value = await load(refresh, signal); fresh = true; }
+    else if (Date.now() - value.at > ttl) load(false).catch(() => {});
     let recent = null, recentError = null;
     if (needRecent) {
       try {
@@ -110,6 +130,7 @@ export function createModelCatalog(launcher) {
             if (!state) throw new Error('当前 OpenCode 版本未提供 state 路径');
             return state;
           }, signal);
+          saveStore(storePath, cache);
         }
         signal?.throwIfAborted();
         const data = location.platform === nativePlatform
@@ -117,6 +138,7 @@ export function createModelCatalog(launcher) {
           : await command({ ...location, executable: '/bin/cat' }, [value.state.replace(/\/$/, '') + '/model.json'], signal);
         recent = recentModel(data);
       } catch (error) { if (signal?.aborted) throw signal.reason; recentError = error.message; }
+      if (recent && !fresh && !value.models.includes(recent)) value = await load(false, signal);
     }
     signal?.throwIfAborted();
     return { models: value.models, recent, recentError };

@@ -50,7 +50,8 @@ let adapters = createAdapters(config.executables, config.platforms);
 const running = new Map();
 const preparing = new Map();
 const launcher = createAgentLauncher(config);
-const modelCatalog = createModelCatalog(launcher);
+const DATA_DIR = process.env.ZOTAGENT_DATA_DIR || join(process.env.USERPROFILE || process.env.HOME || "/tmp", ".local/share/zotero-full-agent");
+const modelCatalog = createModelCatalog(launcher, { storePath: join(DATA_DIR, "opencode-models.json") });
 const instanceID = randomUUID();
 let stopping = false;
 
@@ -82,7 +83,8 @@ function validateRunRequest(body) {
   };
 }
 
-const TEMP_DIR = join(process.env.ZOTAGENT_DATA_DIR || join(process.env.USERPROFILE || process.env.HOME || "/tmp", ".local/share/zotero-full-agent"), "tmp");
+const PTY_CLAIM_TIMEOUT_MS = Number(process.env.ZOTAGENT_PTY_CLAIM_MS) || 30000;
+const TEMP_DIR = join(DATA_DIR, "tmp");
 
 function saveImageToTemp(dataURL) {
   mkdirSync(TEMP_DIR, { recursive: true });
@@ -158,7 +160,7 @@ async function runAgent(request, response, signal) {
     if (!request.cwd.startsWith("/")) request.cwd = location.defaultCwd;
   } else if (!pathMatchesPlatform(request.cwd, location.platform)) request.cwd = location.defaultCwd;
   if (request.agent === "opencode") {
-    const catalog = await modelCatalog(location, false, { signal, recent: !request.model });
+    const catalog = await modelCatalog(location, false, { signal, recent: !request.model, model: request.model });
     check();
     request.model = selectModel(catalog.models, request.model, catalog.recent, catalog.recentError);
   }
@@ -532,7 +534,14 @@ const server = http.createServer(async (request, response) => {
         writeJSON(response, 400, { error: `Unsupported agent: ${agent}` });
         return;
       }
-      const location = await launcher.resolve(agent);
+      let disconnected = false;
+      const onClose = () => { disconnected = true; };
+      response.once("close", onClose);
+      let location;
+      try { location = await launcher.resolve(agent); }
+      finally { response.removeListener("close", onClose); }
+      // WSL discovery can outlast the client's wait; never start a terminal nobody can close.
+      if (disconnected || response.destroyed) return;
       const adapter = createAdapters({ ...config.executables, [agent]: location.executable }, { ...config.platforms, [agent]: location.platform })[agent];
       let cwd = String(body.cwd || "") || location.defaultCwd;
       if (location.platform === "wsl" && process.platform === "win32") cwd = cwd === config.defaultCwd ? location.defaultCwd : toWSLPath(cwd);
@@ -542,7 +551,7 @@ const server = http.createServer(async (request, response) => {
       assertSessionIdle(agent, nativeSessionID, interactive.resumePicker);
       const ptyInvocation = launcher.invocation(location, interactive, agent);
       if (stopping) throw new Error("Runtime 正在停止");
-      const session = createPtySession(ptyInvocation.command, ptyShellArgs(ptyInvocation), ptyInvocation.cwd, ptyInvocation.env || {}, { cols: body.cols, rows: body.rows });
+      const session = createPtySession(ptyInvocation.command, ptyShellArgs(ptyInvocation), ptyInvocation.cwd, ptyInvocation.env || {}, { cols: body.cols, rows: body.rows, claimTimeoutMs: PTY_CLAIM_TIMEOUT_MS });
       const resumedID = agent === "opencode" || interactive.resumePicker ? null : nativeSessionID;
       session.agent = agent; session.nativeSessionID = resumedID;
       session.resumePicker = interactive.resumePicker === true;

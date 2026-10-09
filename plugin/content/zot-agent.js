@@ -3,6 +3,7 @@
 
   const PLUGIN_ID = "zotagent@shzhao.local";
   const PREF_ROOT = "extensions.zotagent.";
+  const PTY_CREATE_TIMEOUT_MS = 20000;
   const controllers = new Map();
   const pdfTextCache = new Map();
   let dialogSequence = 0;
@@ -267,7 +268,7 @@
       if (this._pending) return this._pending;
       this.selectRuntimeProfile();
       this._pending = this._ensureRunning(force).then(async (state) => {
-        if (state.status !== "disabled") await new RuntimeClient(null).syncAgentPaths();
+        if (state.status !== "disabled") await new RuntimeClient(null).syncAgentPaths(force);
         return state;
       });
       try { return await this._pending; }
@@ -858,7 +859,16 @@
       return null;
     }
 
-    async syncAgentPaths() {
+    // Detection spawns every CLI's --version. Repeat it only for a new Runtime
+    // instance or changed settings, not before every message.
+    agentSyncKey() {
+      const names = ["opencodePath", "opencodePlatform", "codexPath", "codexPlatform", "claudePath", "claudePlatform", "wslDistro"];
+      return JSON.stringify([RuntimeManager._health?.instanceID || null, ...names.map(name => String(pref(name, "")))]);
+    }
+
+    async syncAgentPaths(force = false) {
+      if (!force && RuntimeManager._health?.instanceID && RuntimeManager._agentSyncKey === this.agentSyncKey()) return;
+      RuntimeManager._agentSyncKey = null;
       const executables = {}, platforms = {};
       const definitions = { opencode: ["opencodePath", "opencodePlatform"], codex: ["codexPath", "codexPlatform"], "claude-code": ["claudePath", "claudePlatform"] };
       const hostPlatform = RuntimeManager._health?.platform || RuntimeManager.desiredPlatform();
@@ -887,6 +897,7 @@
           const value = String(info.executable || "");
           if (!String(pref(pathPref, "")).trim() && info.available && value) setPref(pathPref, value);
         }
+        RuntimeManager._agentSyncKey = this.agentSyncKey();
       } catch (error) {
         throw new Error("Agent 自动检测失败: " + error.message);
       }
@@ -2464,9 +2475,16 @@
         this.ptyOutput.replaceChildren();
         this._terminal.open(this.ptyOutput);
         this._terminal.onData((data) => this.sendPtyInput(data));
-        const response = await Promise.race([
-          fetch(this.runtime.endpoint("/v1/pty/create"), {
+        // Abort the request itself on timeout so Runtime sees the disconnect and
+        // skips creation; waiting must cover the 15 s WSL CLI discovery.
+        const controller = this.runtime.makeAbortController();
+        let timedOut = false;
+        const timer = setTimeout(() => { timedOut = true; controller?.abort(); }, PTY_CREATE_TIMEOUT_MS);
+        let response;
+        try {
+          response = await fetch(this.runtime.endpoint("/v1/pty/create"), {
             method: "POST",
+            signal: controller?.signal,
             headers: this.runtime.headers(),
             body: JSON.stringify({
               agent: this.agent,
@@ -2475,9 +2493,10 @@
               cols: this._terminal.cols,
               rows: this._terminal.rows,
             }),
-          }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("PTY 创建超时")), 8000)),
-        ]);
+          });
+        } catch (error) {
+          throw timedOut ? new Error("PTY 创建超时") : error;
+        } finally { clearTimeout(timer); }
         if (!response.ok) throw new Error(`终端创建失败: ${response.status} · ${await response.text()}`);
         const data = await response.json();
         this._ptyID = data.ptyID;
