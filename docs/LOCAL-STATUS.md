@@ -1,8 +1,7 @@
 # 本地工作状态
 
-0.5.1 Windows Runtime 修复完成，用户已授权验证后统一提交当前分支。
+0.6.0 修复原生终端孤儿进程、每条消息重复检测 Agent、OpenCode 模型列表重启后重新查询的问题。
 
-- 修改和验证：[0.5.1 修复说明](RELEASE-0.5.1.md)。
-- 安装包：`dist/zotagent-0.5.1.xpi`。
-- 本次不创建 GitHub Release，推送后的远端核对与校验值记录在 VERSION-HISTORY.md。
-- 已有 README 本轮更新段落的本地删除和未跟踪文件不混入本次修复提交。
+- 修改和验证：[CHANGELOG](../CHANGELOG.md) 0.6.0 条目。
+- 安装包：`dist/zotagent-0.6.0.xpi`。
+- 本次不创建 GitHub Release。

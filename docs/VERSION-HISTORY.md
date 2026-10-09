@@ -2,9 +2,9 @@
 
 > 本文件记录本地可见的 Git 历史（含推送前待发布提交），不代表 GitHub 每次 push 的事件日志。推送前 hook 自动更新本地历史；实际推送成功后在文末独立记录，可随下一批修改提交。
 
-- 历史截至：2026-10-08T11:30:57+08:00
+- 历史截至：2026-10-09T17:21:57+08:00
 - 项目：`ShZhao27208/ZotAgent`
-- 可见提交：61 个（按 Git 提交时间升序）
+- 可见提交：62 个（按 Git 提交时间升序）
 - 时间：ISO 8601，带时区
 
 ## 远端分支与标签
@@ -122,6 +122,7 @@
 | 59 | 2026-09-26T03:53:01+08:00 | `0.4.4` | `6983166` | fix: show structured sessions in native resume pickers v0.4.4 |
 | 60 | 2026-09-26T04:50:13+08:00 | `0.4.4` | `e4072da` | docs: rewrite README around research workflow and setup |
 | 61 | 2026-10-08T11:30:57+08:00 | `0.5.0` | `2fbde93` | feat: improve agent compatibility, PDF tools and adaptive UI v0.5.0 |
+| 62 | 2026-10-09T17:21:57+08:00 | `0.5.1` | `e790952` | fix: handle slow OpenCode preparation and verify Runtime builds v0.5.1 |
 
 ## 维护规则
 
@@ -211,3 +212,15 @@
 - 验证：161 项，160 通过，1 项 Windows 专用测试跳过；安装包一致性及 diff 检查通过。
 - 安装包：`dist/zotagent-0.5.0.xpi`，14089845 字节，SHA-256 `fbc215133f7b372079976f014973d2f8d317a028eb7b9dd8e631f358109809ee`。
 - 此条为推送成功后的本地记录，留待下一批修改纳入，不为记录自身再次提交。
+
+### 0.5.1 — Windows Runtime 慢准备与升级一致性修复
+
+- 核对时间：2026-10-09T17:22:06+08:00。
+- 提交：`e7909528696a9e8791cf99e8c22c3f5e6d4ade01`。
+- 分支：`fix/auto-detect-runtime-and-cli-paths`；推送 origin 成功，已用 git ls-remote 核对远端 HEAD。
+- 验证：172 项，171 通过，1 项 Windows CMD 专用测试跳过；构建、源码/安装包一致性和指纹检查通过。
+- 覆盖超过 10 秒准备、失败事件、取消/断线无孤立 Agent、并发共享与停止、同版本部署与跨系统换行指纹。
+- 本机 OpenCode 模型目录 207 项，首轮 3550 ms，缓存轮次小于 1 ms；未直接在故障 Windows 电脑复验。
+- 安装包：`dist/zotagent-0.5.1.xpi`，14092843 字节；SHA-256 `8ff08832781ad1f2d2738c8cc7cdbb27631ada403ad1a77de8232e73c283b942`。
+- 本次只提交推送，不创建 GitHub Release。预先存在的 README 删除与未跟踪文件未纳入提交。
+- 本条为推送成功后的本地记录，留待下一批修改纳入，不为记录自身重复提交。
