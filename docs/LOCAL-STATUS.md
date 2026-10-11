@@ -1,7 +1,9 @@
 # 本地工作状态
 
-0.6.1 归档笔记中的问题与回答分别加边框显示，Markdown 导出展开边框。
+0.6.2 归档采用一个外框和四个内框，依次显示记录标题、用户问题、Agent 回答、上下文与记录信息；框之间不插入空白段落。
 
-- 修改和验证：[CHANGELOG](../CHANGELOG.md) 0.6.1 条目。
-- 安装包：`dist/zotagent-0.6.1.xpi`。
-- 本次不创建 GitHub Release。
+- 修改说明：[CHANGELOG](../CHANGELOG.md) 0.6.2 条目。
+- 安装包：`dist/zotagent-0.6.2.xpi`。
+- 发布及验证结果见 [版本与推送历史](VERSION-HISTORY.md) 文末实际推送记录。
+- 布局由插件本地生成，不调用模型、不额外消耗 token；旧笔记保留原样。
+- Zotero 原生编辑器中的保存重开显示效果尚未实测。

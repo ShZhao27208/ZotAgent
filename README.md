@@ -8,7 +8,7 @@
 
 [下载安装](https://github.com/ShZhao27208/ZotAgent/releases) · [功能一览](#功能一览) · [开始使用](#开始使用) · [版本说明](CHANGELOG.md)
 
-当前版本 **0.6.1** · 开发预览版 · 主要面向 Windows / WSL
+当前版本 **0.6.2** · 开发预览版 · 主要面向 Windows / WSL
 
 </div>
 
@@ -202,7 +202,7 @@ opencode --version
 
 ### 2. 安装插件
 
-1. 从 [Releases](https://github.com/ShZhao27208/ZotAgent/releases) 下载所需版本的 `zotagent-<版本>.xpi`。0.6.1 安装包可从当前源码运行 `npm run build` 生成，输出为 `dist/zotagent-0.6.1.xpi`；GitHub Release 附件以 Releases 页面实际内容为准。
+1. 从 [Releases](https://github.com/ShZhao27208/ZotAgent/releases) 下载所需版本的 `zotagent-<版本>.xpi`。0.6.2 安装包可从当前源码运行 `npm run build` 生成，输出为 `dist/zotagent-0.6.2.xpi`；GitHub Release 附件以 Releases 页面实际内容为准。
 2. 在 Zotero 中打开 **工具 → 插件**，通过菜单选择 **从文件安装插件**。
 3. 选择 XPI，安装后重启 Zotero。
 4. 进入 **Zotero → 设置 → ZotAgent**，点击 **连接并检测**。
@@ -377,7 +377,7 @@ Runtime 默认监听本机 `127.0.0.1:24119`，使用自动生成的 Token 鉴�
 
 内置 Runtime 按“插件版本＋源码构建指纹”隔离部署；即使安装相同版本但 Runtime 源码不同，也不会复用旧部署目录。连接检测同时核对协议与指纹，不只检查端口是否能访问。旧服务可认证且空闲时安全停止并替换；有任务则提示先停止。自定义外置 Runtime 需更新到与安装包匹配的源码。
 
-更新后若仍使用旧行为，退出 Zotero，停止对应端口上的旧 Runtime，安装新 XPI 后重启。手动启动的外置 Runtime 也需更新脚本并重启；0.6.1 要求 Runtime 协议 7，并核对源码构建指纹。不要在反馈中公开 Token。
+更新后若仍使用旧行为，退出 Zotero，停止对应端口上的旧 Runtime，安装新 XPI 后重启。手动启动的外置 Runtime 也需更新脚本并重启；0.6.2 要求 Runtime 协议 7，并核对源码构建指纹。不要在反馈中公开 Token。
 
 </details>
 

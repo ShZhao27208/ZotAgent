@@ -161,19 +161,63 @@ test('failed target selection restores the dropdown to the actual previous desti
   assert.match(dialog.statusElement.textContent,/无法切换归档笔记/);
 });
 
-test('question and answer are framed as separate 1x1 tables that keep boundaries and export as plain Markdown',()=>{
+test('whole record contains four ordered frames and exports readable Markdown',()=>{
   const f=fixture();
   const record={id:'framed',agent:'codex',status:'completed',submittedAt:1,endedAt:2,question:'Q',answer:'A\n\n| X | Y |\n| --- | --- |\n| 1 | 2 |',
     selection:'picked',selectionLabel:'p.3',primaryDocument:{title:'Paper',link:'zotero://select/library/items/KEY'}};
   const doc=f.archive.parse(f.format.renderRecord(record,['IMG'],f.Zotero.ZotAgent.utils.markdownToNoteHTML));
   const frames=[...f.format.noteBody(doc).children].filter(node=>node.localName==='table');
-  assert.equal(frames.length,2);
-  assert.match(frames[0].textContent,/问题[\s\S]*Q[\s\S]*picked/);
-  assert.ok(frames[0].querySelector('img[data-attachment-key="IMG"]'));
-  assert.match(frames[1].querySelector('h3').textContent,/回答/);
-  assert.ok(frames[1].querySelector('td table'));
+  assert.equal(frames.length,1);
+  const sections=[...frames[0].querySelector('td').children].filter(node=>node.localName==='table');
+  assert.equal(sections.length,4);
+  assert.equal(frames[0].querySelector('td').children.length,4, 'no spacer paragraphs between section frames');
+  assert.match(sections[0].querySelector('h2').textContent,/Codex｜Q/);
+  assert.equal(sections[1].querySelector('h3').textContent,'用户问题');
+  assert.match(sections[1].textContent,/Q/);
+  assert.match(sections[2].querySelector('h3').textContent,/Agent 回答 · Codex/);
+  assert.ok(sections[2].querySelector('td table'));
+  assert.equal(sections[3].querySelector('h3').textContent,'上下文与记录信息');
+  assert.match(sections[3].textContent,/picked/);
+  assert.ok(sections[3].querySelector('img[data-attachment-key="IMG"]'));
   assert.equal(f.format.recordsIn(doc).length,1);
   const md=f.Zotero.ZotAgent.archiveExport.toMarkdown(doc);
   assert.match(md,/^### .*问题/m);assert.match(md,/^### .*回答/m);assert.match(md,/^\| 1 \| 2 \|$/m);
   assert.doesNotMatch(md,/<br>|^\| .*问题/m);
+});
+
+
+test('mixed legacy and framed records sort as whole units and retain edits', async()=>{
+  const f=fixture(),p=await f.paper(),target=await f.archive.targetFor(f.format.documentSnapshot(p));
+  const note=f.archive.resolve(target);
+  const meta=encodeURIComponent(JSON.stringify({id:'legacy',asked:2,ended:3}));
+  note.setNote(`<h1>Notes</h1><h2 id="zotagent-record-${meta}">Legacy</h2><p>edited legacy answer</p><h6 id="zotagent-end-legacy">记录结束</h6><p>personal tail</p>`);
+  await f.archive.save(f.record(p,'new',1,4),target);
+  await f.archive.save(f.record(p,'legacy',2,3),target);
+  assert.equal(f.format.recordsIn(f.archive.parse(note.getNote())).map(r=>r.meta.id).join(','),'new,legacy');
+  await f.archive.reorderCurrent('ended');
+  const doc=f.archive.parse(note.getNote()),records=f.format.recordsIn(doc);
+  assert.equal(records.map(r=>r.meta.id).join(','),'legacy,new');
+  assert.equal(records[1].nodes.length,1);
+  assert.equal(records[1].nodes[0].localName,'table');
+  assert.match(note.getNote(),/edited legacy answer/);
+  assert.match(note.getNote(),/personal tail/);
+});
+
+test('answer headings remain below section headings without changing code or full question',()=>{
+  const f=fixture();
+  const question='很长的问题'.repeat(20);
+  const record={id:'headings',agent:'claude-code',status:'completed',submittedAt:1,endedAt:2,question,
+    answer:'# Summary\n## Detail\n```html\n<h1>literal</h1>\n```'};
+  const doc=f.archive.parse(f.format.renderRecord(record,[],f.Zotero.ZotAgent.utils.markdownToNoteHTML));
+  assert.equal(doc.querySelector('h4').textContent,'Summary');
+  assert.equal(doc.querySelector('h5').textContent,'Detail');
+  assert.equal(doc.querySelector('pre').textContent,'<h1>literal</h1>');
+  assert.ok(doc.querySelector('h2').textContent.endsWith('…'));
+  const md=f.Zotero.ZotAgent.archiveExport.toMarkdown(doc);
+  assert.ok(md.includes(question));
+  assert.match(md,/^#### Summary/m);
+  assert.match(md,/^##### Detail/m);
+  assert.match(md,/<h1>literal<\/h1>/);
+  assert.ok(md.indexOf('用户问题')<md.indexOf('Agent 回答'));
+  assert.ok(md.indexOf('Agent 回答')<md.indexOf('上下文与记录信息'));
 });
