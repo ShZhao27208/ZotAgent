@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { createPtySession, writePtyInput, closePtySession, subscribePtySession } from "../runtime/src/pty-manager.js";
 import { resolveClaudePath } from "../runtime/src/config.js";
 
@@ -61,6 +62,19 @@ test("Runtime Host requires authentication and reports health", async (context) 
     }),
   });
   assert.equal(validConfig.status, 200);
+
+  const post = (route, body) => fetch(`http://127.0.0.1:${port}${route}`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body });
+  const perSystem = await post("/v1/config/agents", JSON.stringify({ executables: { windows: { codex: "C:\\bin\\codex.exe" }, wsl: { codex: "codex", "claude-code": "/bin/echo" } } }));
+  assert.equal(perSystem.status, 200);
+  const saved = await perSystem.json();
+  assert.equal(saved.executables.windows.codex, "C:\\bin\\codex.exe", "Windows path saved beside the WSL one");
+  assert.equal(saved.executables.wsl.codex, "", "a bare command name resets to detection instead of failing");
+  assert.equal(saved.executables.wsl["claude-code"], "/bin/echo");
+  const wrongSystem = await post("/v1/config/agents", JSON.stringify({ executables: { windows: { codex: "/usr/bin/codex" } } }));
+  assert.equal(wrongSystem.status, 400);
+  assert.equal((await post("/v1/config/agents", "{not json")).status, 400, "malformed JSON is a client error");
+  assert.equal(health.runtimeVersion, JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version);
+  assert.equal(health.protocolVersion, 8);
 });
 
 test("PTY manager provides interactive terminal IO", async () => {

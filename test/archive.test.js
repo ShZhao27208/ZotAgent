@@ -161,46 +161,45 @@ test('failed target selection restores the dropdown to the actual previous desti
   assert.match(dialog.statusElement.textContent,/无法切换归档笔记/);
 });
 
-test('whole record contains four ordered frames and exports readable Markdown',()=>{
+test('record is bounded by doubled rules, sections split by single rules, and exports readable Markdown',()=>{
   const f=fixture();
-  const record={id:'framed',agent:'codex',status:'completed',submittedAt:1,endedAt:2,question:'Q',answer:'A\n\n| X | Y |\n| --- | --- |\n| 1 | 2 |',
+  const record={id:'ruled',agent:'codex',status:'completed',submittedAt:1,endedAt:2,question:'Q',answer:'A\n\n| X | Y |\n| --- | --- |\n| 1 | 2 |',
     selection:'picked',selectionLabel:'p.3',primaryDocument:{title:'Paper',link:'zotero://select/library/items/KEY'}};
   const doc=f.archive.parse(f.format.renderRecord(record,['IMG'],f.Zotero.ZotAgent.utils.markdownToNoteHTML));
-  const frames=[...f.format.noteBody(doc).children].filter(node=>node.localName==='table');
-  assert.equal(frames.length,1);
-  const sections=[...frames[0].querySelector('td').children].filter(node=>node.localName==='table');
-  assert.equal(sections.length,4);
-  assert.equal(frames[0].querySelector('td').children.length,4, 'no spacer paragraphs between section frames');
-  assert.match(sections[0].querySelector('h2').textContent,/Codex｜Q/);
-  assert.equal(sections[1].querySelector('h3').textContent,'用户问题');
-  assert.match(sections[1].textContent,/Q/);
-  assert.match(sections[2].querySelector('h3').textContent,/Agent 回答 · Codex/);
-  assert.ok(sections[2].querySelector('td table'));
-  assert.equal(sections[3].querySelector('h3').textContent,'上下文与记录信息');
-  assert.match(sections[3].textContent,/picked/);
-  assert.ok(sections[3].querySelector('img[data-attachment-key="IMG"]'));
-  assert.equal(f.format.recordsIn(doc).length,1);
+  const nodes=[...f.format.noteBody(doc).children],tags=nodes.map(node=>node.localName);
+  assert.deepEqual(tags.slice(0,2),['hr','hr']);assert.deepEqual(tags.slice(-2),['hr','hr']);
+  assert.equal(tags.filter(tag=>tag==='hr').length,7,'two boundary pairs and three section rules');
+  assert.equal(nodes.filter(node=>node.localName==='table').length,1,'only the answer table, no frame tables');
+  const order=['h2','用户问题','Agent 回答','上下文与记录信息'].map(text=>nodes.findIndex(node=>text==='h2'?node.localName==='h2':node.textContent.includes(text)&&node.localName==='h3'));
+  assert.ok(order.every((index,i)=>index>0&&(i===0||index>order[i-1])));
+  for(const index of order.slice(1))assert.equal(nodes[index-1].localName,'hr','a thin rule precedes each section');
+  assert.match(nodes[order[0]].textContent,/Codex｜Q/);
+  assert.ok(doc.querySelector('img[data-attachment-key="IMG"]'));
+  const records=f.format.recordsIn(doc);
+  assert.equal(records.length,1);const owned=records[0].nodes.filter(n=>n.nodeType===1);assert.ok(owned.length===nodes.length&&owned.every((n,i)=>n===nodes[i]),'boundary rules belong to the record');
   const md=f.Zotero.ZotAgent.archiveExport.toMarkdown(doc);
   assert.match(md,/^### .*问题/m);assert.match(md,/^### .*回答/m);assert.match(md,/^\| 1 \| 2 \|$/m);
-  assert.doesNotMatch(md,/<br>|^\| .*问题/m);
+  assert.doesNotMatch(md,/---\s*\n\s*---/,'doubled boundary exports as one rule');
 });
 
-
-test('mixed legacy and framed records sort as whole units and retain edits', async()=>{
+test('legacy, framed and ruled records sort as whole units and retain edits', async()=>{
   const f=fixture(),p=await f.paper(),target=await f.archive.targetFor(f.format.documentSnapshot(p));
   const note=f.archive.resolve(target);
-  const meta=encodeURIComponent(JSON.stringify({id:'legacy',asked:2,ended:3}));
-  note.setNote(`<h1>Notes</h1><h2 id="zotagent-record-${meta}">Legacy</h2><p>edited legacy answer</p><h6 id="zotagent-end-legacy">记录结束</h6><p>personal tail</p>`);
+  const meta=id=>encodeURIComponent(JSON.stringify({id,asked:id==='legacy'?2:3,ended:id==='legacy'?3:5}));
+  note.setNote(`<h1>Notes</h1><h2 id="zotagent-record-${meta('legacy')}">Legacy</h2><p>edited legacy answer</p><h6 id="zotagent-end-legacy">记录结束</h6><p>personal tail</p>`
+    +`<table><tbody><tr><td><h2 id="zotagent-record-${meta('framed')}">Framed</h2><p>framed answer</p><h6 id="zotagent-end-framed">记录结束</h6></td></tr></tbody></table>`);
   await f.archive.save(f.record(p,'new',1,4),target);
   await f.archive.save(f.record(p,'legacy',2,3),target);
-  assert.equal(f.format.recordsIn(f.archive.parse(note.getNote())).map(r=>r.meta.id).join(','),'new,legacy');
+  assert.equal(f.format.recordsIn(f.archive.parse(note.getNote())).map(r=>r.meta.id).join(','),'new,legacy,framed');
   await f.archive.reorderCurrent('ended');
   const doc=f.archive.parse(note.getNote()),records=f.format.recordsIn(doc);
-  assert.equal(records.map(r=>r.meta.id).join(','),'legacy,new');
-  assert.equal(records[1].nodes.length,1);
-  assert.equal(records[1].nodes[0].localName,'table');
+  assert.equal(records.map(r=>r.meta.id).join(','),'legacy,new,framed');
+  const ruled=records[1].nodes.map(n=>n.localName);
+  assert.equal(JSON.stringify([ruled.slice(0,2),ruled.slice(-2)]),'[["hr","hr"],["hr","hr"]]','rules move with their record');
+  assert.equal(records[2].nodes.length,1);assert.equal(records[2].nodes[0].localName,'table');
   assert.match(note.getNote(),/edited legacy answer/);
   assert.match(note.getNote(),/personal tail/);
+  assert.doesNotMatch(note.getNote(),/<hr\/?><hr\/?><hr/,'no stray rules left between records');
 });
 
 test('answer headings remain below section headings without changing code or full question',()=>{

@@ -45,3 +45,13 @@ test('Windows CMD executes npm-style wrappers with literal spaced paths', { skip
     assert.equal(ptyShellArgs(invocation), invocation.args.join(' '));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('CMD arguments caret-escape metacharacters so quotes, pipes and %VAR% stay literal', async () => {
+  const { shellInvocation } = await import('../runtime/src/shell.js');
+  const invocation = shellInvocation({ name: 'cmd' }, 'C:\\npm\\codex.cmd', ['a"b & c', '%PATH%', 'tail\\']);
+  const line = invocation.args.at(-1);
+  assert.ok(!/(^|[^^])&/.test(line.replaceAll('^^', '')), 'every & is escaped');
+  assert.ok(line.includes('^%PATH^%'), '%VAR% is not expanded');
+  assert.ok(line.includes('^"a\\^"b^ ^&^ c^"'), 'embedded quote is backslash-escaped for the program and caret-escaped for cmd');
+  assert.ok(line.includes('^"tail\\\\^"'), 'trailing backslash is doubled so it does not escape the closing quote');
+});

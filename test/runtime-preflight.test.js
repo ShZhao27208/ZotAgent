@@ -82,7 +82,7 @@ test('explicit model skips recent path discovery and preparing sessions are rese
 test('matching protocol but stale or missing build fingerprint is rejected by plugin',async()=>{
   const f=fixture();f.Zotero.ZotAgent._runtimeBuildID='a'.repeat(64);const manager=f.api.RuntimeManager;
   for(const buildID of [undefined,'b'.repeat(64),'a'.repeat(64)]) {
-    manager.request=async()=>({ok:true,json:async()=>({platform:'wsl',protocolVersion:7,buildID})});
+    manager.request=async()=>({ok:true,json:async()=>({platform:'wsl',protocolVersion:8,buildID})});
     assert.equal(await manager.probe(),buildID==='a'.repeat(64)?'running':'outdated');
   }
 });

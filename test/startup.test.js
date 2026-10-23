@@ -18,9 +18,9 @@ function fixture() {
     }, debug() {}, HTTP: { request: async (_method, url, options) => {
       assert.ok(options.timeout > 0);
       return { status: 200, response: url.endsWith('/v1/agents') ? {
-        codex: { available: true, executable: '/opt/codex' },
-        'claude-code': { available: true, executable: '/opt/claude' },
-      } : { platform: 'wsl', protocolVersion: 7, defaultCwd: '/home/runtime-user', cwdExists: false } };
+        codex: { available: true, platform: 'wsl', executable: '/opt/codex' },
+        'claude-code': { available: true, platform: 'wsl', executable: '/opt/claude' },
+      } : { platform: 'wsl', protocolVersion: 8, defaultCwd: '/home/runtime-user', cwdExists: false } };
     } } },
     Components: { interfaces: {}, classes: {
       '@mozilla.org/file/local;1': { createInstance: () => ({ initWithPath() {}, exists: () => true }) },
@@ -63,8 +63,8 @@ test('connecting detects agents before any dialog exists and concurrent calls sh
   manager.launch = () => launches++;
   await Promise.all([manager.ensureRunning(), manager.ensureRunning()]);
   assert.equal(launches, 1);
-  assert.equal(prefs.get('codexPath'), '/opt/codex');
-  assert.equal(prefs.get('claudePath'), '/opt/claude');
+  assert.equal(prefs.get('codexPathWSL'), '/opt/codex');
+  assert.equal(prefs.get('claudePathWSL'), '/opt/claude');
 });
 
 test('agent discovery finds native and NVM installations without shell PATH initialization', () => {
@@ -117,7 +117,7 @@ test('failed CLI detection rejects and releases pending connection for retry', a
   const { manager, sandbox } = fixture();
   sandbox.Zotero.HTTP.request = async (_method, url) => {
     if (url.endsWith('/v1/agents')) throw new Error('timeout');
-    return { status: 200, response: { platform: 'wsl', protocolVersion: 7, defaultCwd: '/home/runtime-user' } };
+    return { status: 200, response: { platform: 'wsl', protocolVersion: 8, defaultCwd: '/home/runtime-user' } };
   };
   await assert.rejects(manager.ensureRunning(), /Agent 自动检测失败: timeout/);
   assert.equal(manager._pending, null);
@@ -129,7 +129,7 @@ test('incorrect home directory casing is repaired only when runtime confirms it 
   await manager.probe();
   assert.equal(prefs.get('defaultWorkingDirectory'), '/home/runtime-user');
   prefs.set('defaultWorkingDirectory', '/home/Runtime-User');
-  sandbox.Zotero.HTTP.request = async () => ({ status: 200, response: { platform: 'wsl', protocolVersion: 7, defaultCwd: '/home/runtime-user', cwdExists: true } });
+  sandbox.Zotero.HTTP.request = async () => ({ status: 200, response: { platform: 'wsl', protocolVersion: 8, defaultCwd: '/home/runtime-user', cwdExists: true } });
   await manager.probe();
   assert.equal(prefs.get('defaultWorkingDirectory'), '/home/Runtime-User');
 });

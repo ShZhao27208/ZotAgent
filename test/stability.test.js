@@ -94,7 +94,7 @@ else if(args[0]==='debug') console.log('state '+dir);
 `, { mode: 0o755 });
   await writeFile(path.join(dir, 'models'), 'opencode/a\nopencode/b');
   await writeFile(path.join(dir, 'model.json'), JSON.stringify({ recent: [{ providerID: 'opencode', modelID: 'a' }] }));
-  const launcher = createAgentLauncher({ shell: { name: 'bash' }, defaultCwd: dir, platforms: { opencode: nativePlatform }, executables: { opencode: executable } });
+  const launcher = createAgentLauncher({ shell: { name: 'bash' }, defaultCwd: dir, platforms: { opencode: nativePlatform }, executables:{[nativePlatform]:{opencode:executable}} });
   const location = await launcher.resolve('opencode');
   const storePath = path.join(dir, 'data', 'opencode-models.json');
   const calls = async name => (existsSync(path.join(dir, 'calls')) ? (await readFile(path.join(dir, 'calls'), 'utf8')).split('\n') : []).filter(x => x === name).length;

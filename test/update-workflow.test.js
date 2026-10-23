@@ -27,7 +27,7 @@ test('catalog follows executable state path, reads changed recent record and pre
   t.after(()=>rm(directory,{recursive:true,force:true}));
   const executable=path.join(directory,'fake-opencode');
   await writeFile(executable,`#!${process.execPath}\nconst fs=require('fs');const args=process.argv.slice(2);if(args[0]==='models')console.log('opencode/a\\nopencode/b');else if(args[0]==='debug')console.log('state      '+process.cwd());`,{mode:0o755});
-  const launcher=createAgentLauncher({shell:{name:'bash'},defaultCwd:directory,platforms:{opencode:nativePlatform},executables:{opencode:executable}});
+  const launcher=createAgentLauncher({shell:{name:'bash'},defaultCwd:directory,platforms:{opencode:nativePlatform},executables:{[nativePlatform]:{opencode:executable}}});
   const location=await launcher.resolve('opencode'),catalog=createModelCatalog(launcher);
   for(const model of ['a','b']) {
     await writeFile(path.join(directory,'model.json'),JSON.stringify({recent:[{providerID:'opencode',modelID:model}]}));
@@ -101,7 +101,7 @@ test('busy Runtime stop cancellation leaves service and automatic startup unchan
 });
 
 test('missing explicit agent path fails instead of falling back to installed CLI',async()=>{
-  const launcher=createAgentLauncher({platforms:{opencode:nativePlatform},executables:{opencode:'/nonexistent/zotagent/opencode'},defaultCwd:process.cwd()});
+  const launcher=createAgentLauncher({platforms:{opencode:nativePlatform},executables:{[nativePlatform]:{opencode:'/nonexistent/zotagent/opencode'}},defaultCwd:process.cwd()});
   await assert.rejects(launcher.resolve('opencode'),/手动配置.*路径无效/);
 });
 

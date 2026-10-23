@@ -4,36 +4,57 @@ import { fixture } from './helpers/plugin-fixture.js';
 import { toWSLPath, pathMatchesPlatform, createAgentLauncher, nativePlatform } from '../runtime/src/agent-launch.js';
 
 const key=name=>'extensions.zotagent.'+name;
-test('manual paths are preserved on mismatch and detection never replaces explicit paths',async()=>{
-  const f=fixture();f.Zotero.isWin=true;
-  f.prefs.set(key('opencodePlatform'),'wsl');f.prefs.set(key('opencodePath'),'C:\\old\\opencode.cmd');
-  await assert.rejects(new f.api.RuntimeClient(null).syncAgentPaths(),/手动路径与所选环境不匹配/);
-  assert.equal(f.prefs.get(key('opencodePath')),'C:\\old\\opencode.cmd');
-  f.prefs.set(key('opencodePath'),'/custom/opencode');
-  f.api.RuntimeManager.request=async route=>route==='/v1/config/agents'?{ok:true}:{ok:true,json:async()=>({opencode:{available:false,executable:'/other/opencode'},codex:{available:true,executable:'C:\\bin\\codex.cmd'}})};
-  await new f.api.RuntimeClient(null).syncAgentPaths();
-  assert.equal(f.prefs.get(key('opencodePath')),'/custom/opencode');
-  assert.equal(f.prefs.get(key('codexPath')),'C:\\bin\\codex.cmd');
-});
-test('host profiles restore Windows and WSL settings instead of converting one into the other',()=>{
+test('manual paths are preserved on mismatch and detection fills each system without replacing explicit paths',async()=>{
   const f=fixture();f.Zotero.isWin=true;const manager=f.api.RuntimeManager;
-  f.prefs.set(key('runtimeNodePath'),'C:\\node\\node.exe');f.prefs.set(key('codexPath'),'C:\\bin\\codex.cmd');manager.selectRuntimeProfile();
-  f.prefs.set(key('runtimeHost'),'wsl');manager.selectRuntimeProfile();
+  f.prefs.set(key('opencodePathWSL'),'C:\\old\\opencode.cmd');
+  await assert.rejects(new f.api.RuntimeClient(null).syncAgentPaths(),/WSL 路径格式不对/);
+  assert.equal(f.prefs.get(key('opencodePathWSL')),'C:\\old\\opencode.cmd');
+  f.prefs.set(key('opencodePathWSL'),'/custom/opencode');
+  let sent;
+  manager.request=async(route,options)=>{ if(route==='/v1/config/agents'){sent=JSON.parse(options.body);return {ok:true};}
+    return {ok:true,json:async()=>({opencode:{available:true,platform:'wsl',executable:'/custom/opencode',installations:{windows:'C:\\npm\\opencode.cmd',wsl:'/other/opencode'}},
+      codex:{available:true,platform:'windows',executable:'C:\\bin\\codex.cmd',installations:{windows:'C:\\bin\\codex.cmd',wsl:'/home/u/.nvm/bin/codex'}}})}; };
+  await new f.api.RuntimeClient(null).syncAgentPaths();
+  assert.equal(sent.executables.wsl.opencode,'/custom/opencode');
+  assert.equal(f.prefs.get(key('opencodePathWSL')),'/custom/opencode','explicit path kept');
+  assert.equal(f.prefs.get(key('opencodePathWindows')),'C:\\npm\\opencode.cmd');
+  assert.equal(f.prefs.get(key('codexPathWindows')),'C:\\bin\\codex.cmd');
+  assert.equal(f.prefs.get(key('codexPathWSL')),'/home/u/.nvm/bin/codex','both systems saved at once');
+});
+test('bare command defaults are treated as empty so detected paths can be filled',async()=>{
+  const f=fixture();const manager=f.api.RuntimeManager;
+  f.prefs.set(key('codexPathWSL'),'codex');f.prefs.set(key('claudePathWindows'),'claude');
+  let sent;
+  manager.request=async(route,options)=>{ if(route==='/v1/config/agents'){sent=JSON.parse(options.body);return {ok:true};}
+    return {ok:true,json:async()=>({codex:{available:true,platform:'wsl',executable:'/opt/codex'},'claude-code':{available:true,platform:'windows',executable:'C:\\Users\\me\\.local\\bin\\claude.exe'}})}; };
+  await new f.api.RuntimeClient(null).syncAgentPaths();
+  assert.equal(sent.executables.wsl.codex,'');assert.equal(sent.executables.windows['claude-code'],'');
+  assert.equal(f.prefs.get(key('codexPathWSL')),'/opt/codex');
+  assert.equal(f.prefs.get(key('claudePathWindows')),'C:\\Users\\me\\.local\\bin\\claude.exe');
+});
+test('legacy single-path settings migrate into per-system fields and survive Runtime host switches',()=>{
+  const f=fixture();f.Zotero.isWin=true;const manager=f.api.RuntimeManager;
+  f.prefs.set(key('codexPath'),'C:\\bin\\codex.cmd');f.prefs.set(key('claudePath'),'claude');
+  f.prefs.set(key('runtimeProfiles'),JSON.stringify({'wsl:Ubuntu':{codexPath:'/home/user/codex',runtimeNodePath:'/usr/bin/node'}}));
+  f.prefs.set(key('runtimeNodePath'),'C:\\node\\node.exe');manager.selectRuntimeProfile();
+  assert.equal(f.prefs.get(key('codexPathWindows')),'C:\\bin\\codex.cmd');
+  assert.equal(f.prefs.get(key('codexPathWSL')),'/home/user/codex');
+  assert.equal(f.prefs.get(key('claudePathWindows'))??'','','bare command is not a path');
   assert.equal(f.prefs.get(key('codexPath')),'');
-  f.prefs.set(key('runtimeNodePath'),'/usr/bin/node');f.prefs.set(key('codexPath'),'/home/user/codex');
+  assert.ok(!JSON.parse(f.prefs.get(key('runtimeProfiles')))['wsl:Ubuntu'].codexPath,'migrated value is not refilled later');
+  f.prefs.set(key('runtimeHost'),'wsl');manager.selectRuntimeProfile();
+  assert.equal(f.prefs.get(key('runtimeNodePath')),'/usr/bin/node','Runtime settings still follow the host profile');
+  assert.equal(f.prefs.get(key('codexPathWindows')),'C:\\bin\\codex.cmd','Agent paths do not follow the host profile');
   f.prefs.set(key('runtimeHost'),'auto');manager.selectRuntimeProfile();
   assert.equal(f.prefs.get(key('runtimeNodePath')),'C:\\node\\node.exe');
-  assert.equal(f.prefs.get(key('codexPath')),'C:\\bin\\codex.cmd');
-  f.prefs.set(key('runtimeHost'),'wsl');manager.selectRuntimeProfile();
-  assert.equal(f.prefs.get(key('codexPath')),'/home/user/codex');
 });
 test('healthy but wrong host or old protocol is not silently reused',async()=>{
   const f=fixture();f.Zotero.isWin=true;const m=f.api.RuntimeManager;
-  m.request=async()=>({ok:true,json:async()=>({platform:'wsl',protocolVersion:7})});
+  m.request=async()=>({ok:true,json:async()=>({platform:'wsl',protocolVersion:8})});
   assert.equal(await m.probe(),'wrong-environment');
   m.request=async()=>({ok:true,json:async()=>({platform:'windows',protocolVersion:2})});
   assert.equal(await m.probe(),'outdated');
-  m.request=async()=>({ok:true,json:async()=>({platform:'windows',protocolVersion:7})});
+  m.request=async()=>({ok:true,json:async()=>({platform:'windows',protocolVersion:8})});
   assert.equal(await m.probe(),'running');
 });
 test('custom endpoint is preserved when environment does not match',async()=>{
@@ -55,12 +76,23 @@ test('terminal environment survives native and cross-host launch without changin
   const built={args:['--resume'],cwd:'/work',env:{CLAUDE_CODE_ENTRYPOINT:'sdk-cli'}};
   const native=launcher.invocation({platform:nativePlatform,executable:'/bin/claude'},built,'claude-code');
   assert.deepEqual(native.env,built.env);
-  // Exercise the WSL wrapper constructor irrespective of the test host platform.
-  const remote={platform:nativePlatform==='windows'?'wsl':'windows',executable:'/bin/claude',distro:'Ubuntu'};
-  const wsl=launcher.invocation(remote,built,'claude-code');
-  assert.equal(wsl.command,'wsl.exe');
-  assert.match(wsl.args.at(-1),/export CLAUDE_CODE_ENTRYPOINT='sdk-cli'\ncd -- '\/work' \|\| exit 1\nexec/);
-  assert.throws(()=>launcher.invocation(remote,{...built,env:{'INVALID;name':'x'}},'claude-code'),/Invalid Agent environment/);
+  // Exercise the cross-system wrapper for whichever system this host is not.
+  if(nativePlatform==='windows'){
+    const remote={platform:'wsl',executable:'/bin/claude',distro:'Ubuntu'};
+    const wsl=launcher.invocation(remote,built,'claude-code');
+    assert.equal(wsl.command,'wsl.exe');
+    assert.match(wsl.args.at(-1),/export CLAUDE_CODE_ENTRYPOINT='sdk-cli'\ncd -- '\/work' \|\| exit 1\nexec/);
+    assert.throws(()=>launcher.invocation(remote,{...built,env:{'INVALID;name':'x'}},'claude-code'),/Invalid Agent environment/);
+  } else {
+    const remote={platform:'windows',executable:'C:\\Tools\\claude.exe',defaultCwd:'C:\\Users\\me'};
+    const win=launcher.invocation(remote,{...built,cwd:'C:\\Users\\me\\work'},'claude-code');
+    assert.equal(win.command,'/mnt/c/Tools/claude.exe');
+    assert.deepEqual(win.args,['--resume']);
+    assert.equal(win.cwd,'/mnt/c/Users/me/work');
+    assert.equal(win.env.CLAUDE_CODE_ENTRYPOINT,'sdk-cli');
+    assert.match(win.env.WSLENV,/(^|:)CLAUDE_CODE_ENTRYPOINT$/);
+    assert.throws(()=>launcher.invocation(remote,{...built,env:{'INVALID;name':'x'}},'claude-code'),/Invalid Agent environment/);
+  }
   assert.equal(process.env.CLAUDE_CODE_ENTRYPOINT,before);
 });
 
