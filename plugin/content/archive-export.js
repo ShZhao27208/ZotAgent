@@ -8,7 +8,10 @@
       if (node.nodeType !== 1) return "";
       const tag = node.localName.toLowerCase();
       if (["script", "style"].includes(tag)) return "";
-      if ((node.id || "").startsWith("zotagent-end-")) return "\n---\n\n";
+      // Markdown has one rule weight: the doubled record boundary becomes one rule.
+      const isRule = element => element?.localName?.toLowerCase() === "hr";
+      if ((node.id || "").startsWith("zotagent-end-")) return isRule(node.nextElementSibling) ? "" : "\n---\n\n";
+      if (tag === "hr" && isRule(node.previousElementSibling)) return "";
       if (tag === "pre") {
         const text = node.textContent;
         const size = Math.max(3, ...(text.match(/`+/g) || []).map(s => s.length + 1));

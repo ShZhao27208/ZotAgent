@@ -74,6 +74,15 @@
   }
 
   const runtimeProcesses = new Set();
+  const AGENT_PREFS = { opencode: "opencode", codex: "codex", "claude-code": "claude" };
+  const BARE_COMMANDS = { opencode: ["opencode"], codex: ["codex"], "claude-code": ["claude", "claude-code"] };
+  const isWindowsPath = value => /^(?:[a-z]:[\\/]|\\\\(?!wsl[.$]))/i.test(value);
+  function agentPathPref(agent, system) { return AGENT_PREFS[agent] + "Path" + (system === "windows" ? "Windows" : "WSL"); }
+  // A bare command name is the old default, not a location; it means "detect".
+  function agentPathSystem(agent, value) {
+    if (!value || BARE_COMMANDS[agent].includes(value)) return null;
+    return isWindowsPath(value) ? "windows" : value.startsWith("/") ? "wsl" : null;
+  }
 
   const RuntimeManager = {
     token() {
@@ -108,9 +117,30 @@
       return Zotero.isWin && pref("runtimeHost", "auto") !== "wsl" ? "windows" : "wsl";
     },
 
+    // Agent paths used to be one field per Agent inside each Runtime host
+    // profile. Split them into per-system fields so both installations persist.
+    migrateAgentPaths() {
+      let profiles = {};
+      try { profiles = JSON.parse(pref("runtimeProfiles", "{}")); } catch {}
+      for (const [agent, prefix] of Object.entries(AGENT_PREFS)) {
+        const legacy = [pref(prefix + "Path", ""), ...Object.values(profiles).map(profile => profile?.[prefix + "Path"])];
+        for (const value of legacy.map(v => String(v || "").trim())) {
+          const system = agentPathSystem(agent, value);
+          if (system && !String(pref(agentPathPref(agent, system), "")).trim()) setPref(agentPathPref(agent, system), value);
+        }
+        if (pref(prefix + "Path", "")) setPref(prefix + "Path", "");
+        // Drop migrated values so a field the user clears later is not refilled.
+        for (const profile of Object.values(profiles)) {
+          if (profile) { delete profile[prefix + "Path"]; delete profile[prefix + "Platform"]; }
+        }
+      }
+      if (pref("runtimeProfiles", "")) setPref("runtimeProfiles", JSON.stringify(profiles));
+    },
+
     selectRuntimeProfile() {
+      this.migrateAgentPaths();
       const key = this.desiredPlatform() === "windows" ? "windows" : "wsl:" + String(pref("wslDistro", "Ubuntu")).trim();
-      const fields = ["runtimeEndpoint", "runtimeScriptPath", "runtimeNodePath", "defaultWorkingDirectory", "opencodePath", "codexPath", "claudePath", "opencodePlatform", "codexPlatform", "claudePlatform"];
+      const fields = ["runtimeEndpoint", "runtimeScriptPath", "runtimeNodePath", "defaultWorkingDirectory"];
       let profiles = {};
       try { profiles = JSON.parse(pref("runtimeProfiles", "{}")); } catch {}
       let previous = String(pref("activeRuntimeProfile", ""));
@@ -121,8 +151,7 @@
       }
       if (previous !== key) {
         profiles[previous] = Object.fromEntries(fields.map(name => [name, pref(name, "")]));
-        const defaults = { runtimeEndpoint: key === "windows" ? "http://127.0.0.1:24119" : "http://127.0.0.1:24139", runtimeNodePath: key === "windows" ? "" : "node",
-          opencodePlatform: "auto", codexPlatform: "auto", claudePlatform: "auto" };
+        const defaults = { runtimeEndpoint: key === "windows" ? "http://127.0.0.1:24119" : "http://127.0.0.1:24139", runtimeNodePath: key === "windows" ? "" : "node" };
         const saved = profiles[key] || defaults;
         for (const name of fields) setPref(name, saved[name] ?? "");
         setPref("runtimeProfiles", JSON.stringify(profiles));
@@ -152,7 +181,7 @@
           this._health = health;
           if ((health.platform || health.shell?.platform) !== this.desiredPlatform()) return "wrong-environment";
           if (this.desiredPlatform() === "wsl" && health.wslDistro && health.wslDistro !== String(pref("wslDistro", "Ubuntu"))) return "wrong-environment";
-          if (Number(health.protocolVersion || 0) < 7) return "outdated";
+          if (Number(health.protocolVersion || 0) < 8) return "outdated";
           if (Zotero.ZotAgent._runtimeBuildID && health.buildID !== Zotero.ZotAgent._runtimeBuildID) return "outdated";
           const incorrectHomeCase = health.cwdExists === false && cwd.toLowerCase() === health.defaultCwd?.toLowerCase();
           if ((!cwd || incorrectHomeCase || (Zotero.isWin && pref("runtimeHost", "auto") !== "wsl" && cwd.startsWith("/"))) && health.defaultCwd && (/^[a-z]:[\\/]/i.test(health.defaultCwd) || health.defaultCwd.startsWith("/"))) {
@@ -214,13 +243,13 @@
       if (!runtimePath.startsWith("/")) {
         throw new Error("未找到 Runtime 源码，请在设置中填写 runtime/src/index.js 的 WSL 绝对路径");
       }
+      // A Windows node.exe seen through /mnt is not a Linux Node; detect one in WSL instead.
+      const isLinuxNode = value => value.startsWith("/") && !/^\/mnt\/[a-z]\/.*\.exe$/i.test(value);
       let nodePath = String(pref("runtimeNodePath", "node")).trim() || "node";
-      if (nodePath === "node" && Zotero.ZotAgent?._runtimeLocation?.node) {
-        nodePath = windowsToWSLPath(Zotero.ZotAgent._runtimeLocation.node);
+      if (!isLinuxNode(nodePath)) {
+        const built = windowsToWSLPath(Zotero.ZotAgent?._runtimeLocation?.node || "");
+        nodePath = isLinuxNode(built) ? built : "node";
         setPref("runtimeNodePath", nodePath);
-      }
-      if (!nodePath.startsWith("/")) {
-        throw new Error("请填写 Runtime Node.js 绝对路径，或使用本机源码构建的安装包");
       }
       const endpoint = this.endpoint();
       const address = endpoint.match(/^http:\/\/(?:127\.0\.0\.1|localhost)(?::(\d+))?$/);
@@ -228,8 +257,6 @@
       if (!address || port < 1 || port > 65535) {
         throw new Error("自动启动仅支持 http://127.0.0.1:端口 或 http://localhost:端口");
       }
-      const nodeDirectory = nodePath.slice(0, nodePath.lastIndexOf("/"));
-      const runtimePathValue = [nodeDirectory, "/usr/local/bin", "/usr/bin", "/bin"].join(":");
       const distro = String(pref("wslDistro", "Ubuntu")).trim() || "Ubuntu";
       const executable = Components.classes["@mozilla.org/file/local;1"]
         .createInstance(Components.interfaces.nsIFile);
@@ -242,12 +269,12 @@
       process.startHidden = true;
       process.noShell = true;
       // Pass literal argv directly, as in the known-good September 10 launcher.
-      const args = [
-        "-d", distro, "--exec", "/usr/bin/env",
-        `ZOTAGENT_TOKEN=${this.token()}`, `ZOTAGENT_PORT=${port}`,
-        "ZOTAGENT_HOST=127.0.0.1", `PATH=${runtimePathValue}`,
-        nodePath, runtimePath,
-      ];
+      const environment = ["-d", distro, "--exec", "/usr/bin/env", `ZOTAGENT_TOKEN=${this.token()}`, `ZOTAGENT_PORT=${port}`, "ZOTAGENT_HOST=127.0.0.1"];
+      // Without a known Node, a login shell loads NVM and finds Node in the
+      // distribution; the script path stays a separate literal argument.
+      const args = nodePath === "node"
+        ? [...environment, "/bin/bash", "-lc", 'export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"; [ ! -s "$NVM_DIR/nvm.sh" ] || . "$NVM_DIR/nvm.sh"; command -v node >/dev/null || exit 127; exec node "$0"', runtimePath]
+        : [...environment, `PATH=${[nodePath.slice(0, nodePath.lastIndexOf("/")), "/usr/local/bin", "/usr/bin", "/bin"].join(":")}`, nodePath, runtimePath];
       this._launchProcess = process;
       const observer = {
         observe: (_subject, topic) => {
@@ -862,24 +889,24 @@
     // Detection spawns every CLI's --version. Repeat it only for a new Runtime
     // instance or changed settings, not before every message.
     agentSyncKey() {
-      const names = ["opencodePath", "opencodePlatform", "codexPath", "codexPlatform", "claudePath", "claudePlatform", "wslDistro"];
-      return JSON.stringify([RuntimeManager._health?.instanceID || null, ...names.map(name => String(pref(name, "")))]);
+      const names = Object.values(AGENT_PREFS).flatMap(prefix => [prefix + "PathWindows", prefix + "PathWSL", prefix + "Platform"]);
+      return JSON.stringify([RuntimeManager._health?.instanceID || null, ...[...names, "wslDistro"].map(name => String(pref(name, "")))]);
     }
 
     async syncAgentPaths(force = false) {
+      RuntimeManager.migrateAgentPaths();
       if (!force && RuntimeManager._health?.instanceID && RuntimeManager._agentSyncKey === this.agentSyncKey()) return;
       RuntimeManager._agentSyncKey = null;
-      const executables = {}, platforms = {};
-      const definitions = { opencode: ["opencodePath", "opencodePlatform"], codex: ["codexPath", "codexPlatform"], "claude-code": ["claudePath", "claudePlatform"] };
-      const hostPlatform = RuntimeManager._health?.platform || RuntimeManager.desiredPlatform();
-      for (const [agent, [pathPref, platformPref]] of Object.entries(definitions)) {
-        const selection = String(pref(platformPref, "auto"));
+      const executables = { windows: {}, wsl: {} }, platforms = {};
+      for (const [agent, prefix] of Object.entries(AGENT_PREFS)) {
+        const selection = String(pref(prefix + "Platform", "auto"));
         platforms[agent] = ["windows", "wsl"].includes(selection) ? selection : "auto";
-        const actual = platforms[agent] === "auto" ? hostPlatform : platforms[agent];
-        const value = String(pref(pathPref, "")).trim();
-        const matches = actual === "windows" ? /^(?:[a-z]:[\\/]|\\\\(?!wsl[.$]))/i.test(value) : value.startsWith("/");
-        if (value && !matches) throw new Error(`${agent} 手动路径与所选环境不匹配：${value}；请修正或清空后重新检测`);
-        executables[agent] = value;
+        for (const system of ["windows", "wsl"]) {
+          const value = String(pref(agentPathPref(agent, system), "")).trim();
+          if (BARE_COMMANDS[agent].includes(value)) { setPref(agentPathPref(agent, system), ""); executables[system][agent] = ""; continue; }
+          if (value && agentPathSystem(agent, value) !== system) throw new Error(`${agent} 的 ${system === "windows" ? "Windows" : "WSL"} 路径格式不对：${value}；请修正或清空后重新检测`);
+          executables[system][agent] = value;
+        }
       }
       const response = await RuntimeManager.request("/v1/config/agents", {
         method: "POST", body: JSON.stringify({ executables, platforms, wslDistro: String(pref("wslDistro", "Ubuntu")) }),
@@ -891,11 +918,16 @@
         const agents = await agentsRes.json();
         if (this.dialog) this.dialog._agentCapabilities = agents;
         RuntimeManager._agents = agents;
+        // Fill each empty field from that system's detected installation; never
+        // overwrite a path the user typed.
         for (const [agent, info] of Object.entries(agents)) {
-          if (!definitions[agent]) continue;
-          const pathPref = definitions[agent][0];
-          const value = String(info.executable || "");
-          if (!String(pref(pathPref, "")).trim() && info.available && value) setPref(pathPref, value);
+          if (!AGENT_PREFS[agent]) continue;
+          const found = { ...(info.installations || {}) };
+          if (info.available && info.executable && info.platform) found[info.platform] ||= info.executable;
+          for (const system of ["windows", "wsl"]) {
+            const value = String(found[system] || "");
+            if (value && agentPathSystem(agent, value) === system && !String(pref(agentPathPref(agent, system), "")).trim()) setPref(agentPathPref(agent, system), value);
+          }
         }
         RuntimeManager._agentSyncKey = this.agentSyncKey();
       } catch (error) {
@@ -996,6 +1028,8 @@
       this.agent = String(pref("defaultAgent", "claude-code"));
       this.sessions = Object.create(null);
       this.sessionDirectories = Object.create(null);
+      // Windows and WSL installations keep separate histories; remember which owns each session.
+      this.sessionPlatforms = Object.create(null);
       this.messages = [];
       this.requestID = null;
       this._requestState = "idle";
@@ -2048,7 +2082,7 @@
         selection: this.selectionInput.value.trim(), selectionLabel: this.selectionLabel.textContent,
         selectionDocument: this.selectionSnapshot?.document || null,
         image: this.capturedImage || null, separate: this._multiMode === "separate" && contexts.length > 1,
-        nativeSessionID: this.sessions[this.agent] || null, cancelled: false,
+        nativeSessionID: this.sessions[this.agent] || null, sessionPlatform: this.sessionPlatforms[this.agent] || null, cancelled: false,
         archiveTarget: primaryDocument ? Zotero.ZotAgent.archive.targetFor(primaryDocument) : Promise.resolve(null),
       };
       batch.archiveTarget.catch(() => {});
@@ -2121,7 +2155,7 @@
         if (this.fullTextStatus) this.fullTextStatus.textContent = request.fullTextAttachments.map(e => `${e.title}：${format.fullTextDescription(e)}`).join("\n");
         const prompt = this.buildRequestPrompt(batch, request, contexts, fullTexts);
         const payload = { windowID: this.id, requestID: request.id, agent: batch.agent,
-          nativeSessionID: batch.separate ? null : batch.nativeSessionID, cwd: batch.cwd,
+          nativeSessionID: batch.separate ? null : batch.nativeSessionID, platform: batch.separate ? null : batch.sessionPlatform, cwd: batch.cwd,
           model: batch.model, prompt, files: [], image: request.imageSnapshots[0] || null };
         request.status = "running";
         if (visible()) { this._requestState = "running"; this.renderStatus("Agent 运行中..."); }
@@ -2129,6 +2163,7 @@
           if (!visible() || batch.cancelled || event.requestID !== request.id) return;
           if (event.type === "request.started") {
             request.cwd = event.data?.cwd || batch.cwd;
+            request.platform = event.data?.platform || null;
             for (const entry of request.fullTextAttachments) if (entry.extractedChars) entry.state = "received";
           }
           if (event.type === "input.submitted") {
@@ -2140,7 +2175,8 @@
             if (!batch.separate) {
               this.sessions[batch.agent] = event.nativeSessionID;
               this.sessionDirectories[batch.agent] = request.cwd || batch.cwd;
-              SessionHistory.upsert({ agent: batch.agent, nativeSessionID: event.nativeSessionID, windowID: this.id, cwd: request.cwd || batch.cwd,
+              this.sessionPlatforms[batch.agent] = request.platform || null;
+              SessionHistory.upsert({ agent: batch.agent, nativeSessionID: event.nativeSessionID, windowID: this.id, cwd: request.cwd || batch.cwd, platform: request.platform || null,
                 title: batch.primaryDocument?.title || "普通聊天", documentKey: batch.primaryDocument?.key || null,
                 documentLibraryID: batch.primaryDocument?.libraryID ?? null,
                 references: batch.references.map(d => ({ libraryID: d.libraryID, key: d.key })),
@@ -2334,6 +2370,7 @@
       this.agent = entry.agent;
       this.sessions[entry.agent] = entry.nativeSessionID;
       this.sessionDirectories[entry.agent] = entry.cwd || "";
+      this.sessionPlatforms[entry.agent] = entry.platform || null;
       if (entry.cwd) this.cwdInput.value = entry.cwd;
       const agentSelect = this.element.querySelector(".zotagent-agent-select");
       if (agentSelect) agentSelect.value = entry.agent;
@@ -2490,6 +2527,7 @@
               agent: this.agent,
               cwd: this.sessions[this.agent] ? this.sessionDirectories[this.agent] || this.cwdInput.value.trim() || pref("defaultWorkingDirectory", "") : this.cwdInput.value.trim() || pref("defaultWorkingDirectory", ""),
               sessionID: this.sessions[this.agent] || null,
+              platform: this.sessions[this.agent] ? this.sessionPlatforms[this.agent] || null : null,
               cols: this._terminal.cols,
               rows: this._terminal.rows,
             }),

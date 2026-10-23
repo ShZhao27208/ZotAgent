@@ -27,7 +27,8 @@ await fs.cp(pluginSource, pluginBuild, { recursive: true });
 const runtimeBuild = path.join(buildDir, "runtime");
 await fs.mkdir(runtimeBuild, { recursive: true });
 await fs.cp(path.join(root, "runtime/src"), path.join(runtimeBuild, "src"), { recursive: true });
-await fs.writeFile(path.join(runtimeBuild, "package.json"), JSON.stringify({ type: "module" }));
+const { version } = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
+await fs.writeFile(path.join(runtimeBuild, "package.json"), JSON.stringify({ type: "module", version }));
 const ptySource = path.join(root, "node_modules/node-pty");
 const ptyTarget = path.join(runtimeBuild, "node_modules/node-pty");
 for (const entry of ["package.json", "LICENSE", "lib", "prebuilds/win32-x64", "prebuilds/win32-arm64"]) {

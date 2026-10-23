@@ -8,7 +8,7 @@
 
 [下载安装](https://github.com/ShZhao27208/ZotAgent/releases) · [功能一览](#功能一览) · [开始使用](#开始使用) · [版本说明](CHANGELOG.md)
 
-当前版本 **0.6.2** · 开发预览版 · 主要面向 Windows / WSL
+当前版本 **0.7.0** · 开发预览版 · 主要面向 Windows / WSL
 
 </div>
 
@@ -41,20 +41,6 @@ ZotAgent 是面向学术阅读与研究工作的 **Zotero Agent 工作台**。
 ### 讨论留痕，结果回到文献
 
 插件自动保存问题、回答、来源和时间，将多个窗口、多个 Agent 的记录汇集到主文献下。归档由插件直接完成，**不额外调用模型，也不消耗 Agent 的生成 token**。重要回答还可以单独收藏，形成“完整过程记录 + 重点研究笔记”的层次。
-
-## 0.5.0 本轮更新
-
-本轮根据实际使用反馈完成以下功能和修复，具体操作见下文：
-
-- 修复分发安装中 OpenCode `Unrecognized flag: --dir in command run`：使用进程工作目录启动，移除冗余目录参数。三个 Agent 保留结构化输出、会话恢复和图片等必要参数。
-- OpenCode 使用动态模型 ID 下拉菜单，支持跟随同一环境最近使用的模型；不再将显示名称作为模型 ID，也不自动退回过期默认模型。
-- 设置页仅保留“检测 OpenCode / 检测 Codex / 检测 Claude Code”；空路径自动检测并回填，已填写路径按原值验证。模型刷新按钮位于模型菜单旁。
-- 增加全文批量勾选与 PDF 文本逐篇 Markdown 导出；按用户反馈分组文献操作，并修复导出选择面板被原布局遮挡的问题。
-- 增加 Runtime 安全启动、停止、重启与手动停止状态保护。
-- 输入框改为 Enter 发送、Shift+Enter 换行，保护中文输入法确认操作。
-- 增加内容尺寸适配，并修复自动布局与手动缩放相互触发造成的震荡，手动尺寸保持优先。
-
-验证：161 项回归测试中 160 项通过，1 项 Windows 专用测试在 Linux/WSL 跳过；构建与安装包一致性检查通过。本机 OpenCode 使用 `opencode/space-bunny-free` 完成真实最小问答。Windows Zotero 的实际交互仍需按[版本说明](docs/RELEASE-0.5.1.md)复验。
 
 ## 功能一览
 
@@ -202,7 +188,7 @@ opencode --version
 
 ### 2. 安装插件
 
-1. 从 [Releases](https://github.com/ShZhao27208/ZotAgent/releases) 下载所需版本的 `zotagent-<版本>.xpi`。0.6.2 安装包可从当前源码运行 `npm run build` 生成，输出为 `dist/zotagent-0.6.2.xpi`；GitHub Release 附件以 Releases 页面实际内容为准。
+1. 从 [Releases](https://github.com/ShZhao27208/ZotAgent/releases) 下载所需版本的 `zotagent-<版本>.xpi`。0.7.0 安装包可从当前源码运行 `npm run build` 生成，输出为 `dist/zotagent-0.7.0.xpi`；GitHub Release 附件以 Releases 页面实际内容为准。
 2. 在 Zotero 中打开 **工具 → 插件**，通过菜单选择 **从文件安装插件**。
 3. 选择 XPI，安装后重启 Zotero。
 4. 进入 **Zotero → 设置 → ZotAgent**，点击 **连接并检测**。
@@ -215,11 +201,14 @@ Windows 安装包包含 Runtime 源码及 Windows x64 / ARM64 终端依赖，不
 
 | 你的使用方式 | 建议配置 |
 | --- | --- |
-| Windows 上安装 Agent | 后端保持“自动”，Agent 选择“Windows”或跟随后端，优先自动检测路径。 |
-| Windows Zotero + WSL Agent | 后端保持“自动”，将对应 Agent 选择为“WSL (Linux)”，填写发行版及必要的 Linux CLI 路径。 |
-| 整个后端运行在 WSL | 后端选择“WSL（手动高级配置）”，在 WSL 准备 Runtime 依赖，填写脚本、Node 和工作目录。 |
+| Windows 上安装 Agent | 后端保持“自动”，Agent 选择“自动”或“Windows”，路径留空自动检测。 |
+| Windows Zotero + WSL Agent | 后端保持“自动”，将对应 Agent 选择为“WSL (Linux)”或“自动”，确认发行版；路径留空自动检测。 |
+| 两个系统都装了 Agent | 每个 Agent 分别选择 Windows 或 WSL，可在不同窗口同时使用；两边路径分别保存，切换不会清空另一边。 |
+| 整个后端运行在 WSL | 后端选择“WSL（手动高级配置）”，在 WSL 准备 Runtime 依赖；Node 可留空，由 WSL 登录环境（含 NVM）查找。 |
 
-默认工作目录决定 Agent 在哪个文件夹工作，可选择研究项目目录。Windows 路径与 WSL 路径不能混填；WSL Runtime 目前不支持反向启动 Windows Agent，应使用 Windows 后端完成混合配置。
+每个 Agent 有“Windows 路径”和“WSL 路径”两个字段，留空时连接后自动检测并回填，已填写的路径不会被覆盖。“自动”优先使用后端所在系统，未安装时改用另一系统。Windows 后端通过 `wsl.exe` 启动 WSL Agent，WSL 后端通过 Windows 互操作启动 Windows Agent。“检测连接”会同时列出两个系统的 Node.js。
+
+默认工作目录决定 Agent 在哪个文件夹工作，可选择研究项目目录；跨系统运行时自动在 `C:\…` 与 `/mnt/c/…` 之间转换。
 
 <details>
 <summary><strong>Windows：查找 CLI 路径与安装 Claude Code</strong></summary>
@@ -377,7 +366,7 @@ Runtime 默认监听本机 `127.0.0.1:24119`，使用自动生成的 Token 鉴�
 
 内置 Runtime 按“插件版本＋源码构建指纹”隔离部署；即使安装相同版本但 Runtime 源码不同，也不会复用旧部署目录。连接检测同时核对协议与指纹，不只检查端口是否能访问。旧服务可认证且空闲时安全停止并替换；有任务则提示先停止。自定义外置 Runtime 需更新到与安装包匹配的源码。
 
-更新后若仍使用旧行为，退出 Zotero，停止对应端口上的旧 Runtime，安装新 XPI 后重启。手动启动的外置 Runtime 也需更新脚本并重启；0.6.2 要求 Runtime 协议 7，并核对源码构建指纹。不要在反馈中公开 Token。
+更新后若仍使用旧行为，退出 Zotero，停止对应端口上的旧 Runtime，安装新 XPI 后重启。手动启动的外置 Runtime 也需更新脚本并重启；0.7.0 要求 Runtime 协议 8，并核对源码构建指纹。不要在反馈中公开 Token。
 
 </details>
 

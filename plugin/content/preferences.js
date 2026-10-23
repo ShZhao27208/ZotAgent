@@ -35,10 +35,13 @@
       }
       const lines = [`${agentName}:`];
       lines.push(`  状态: ${info.available ? "✓ 可用" : "✗ 不可用"}`);
-      lines.push(`  平台: ${info.platform === "windows" ? "Windows" : "WSL (Linux)"}`);
+      lines.push(`  当前使用: ${info.platform === "windows" ? "Windows" : "WSL (Linux)"}`);
       if (info.version) lines.push(`  版本: ${info.version}`);
       if (info.executable) lines.push(`  路径: ${info.executable}`);
       if (info.error) lines.push(`  错误: ${info.error}`);
+      for (const [system, found] of Object.entries(info.installations || {})) {
+        lines.push(`  ${system === "windows" ? "Windows" : "WSL"} 安装: ${found || "未找到"}`);
+      }
       lines.push(`  结构化输出: ✓ 支持`);
       lines.push(`  Session 恢复: ✓ 支持 (--resume / --session)`);
       if (agentName === "claude-code") {
@@ -63,7 +66,7 @@
     if (select._refreshing) return;
     select._refreshing = true;
     const status = doc.querySelector("#zotagent-agent-result");
-    const environment = () => JSON.stringify(["runtimeHost", "runtimeEndpoint", "wslDistro", "opencodePath", "opencodePlatform"].map(get));
+    const environment = () => JSON.stringify(["runtimeHost", "runtimeEndpoint", "wslDistro", "opencodePathWindows", "opencodePathWSL", "opencodePlatform"].map(get));
     const originalEnvironment = environment();
     try {
       await Zotero.ZotAgent.runtimeManager.ensureRunning();
@@ -177,14 +180,13 @@
         }
         set(name, isCheckbox(element) ? element.checked : element.value);
         if (environmentChange) {
-          const pathPref = { opencodePlatform: "opencodePath", codexPlatform: "codexPath", claudePlatform: "claudePath" }[name];
-          if (pathPref) set(pathPref, "");
+          // Both systems keep their own path, so switching never erases the other one.
           const changedAgent = { opencodePlatform: "opencode", codexPlatform: "codex", claudePlatform: "claude-code" }[name];
           for (const controller of Zotero.ZotAgent.controllers.values()) {
             for (const dialog of controller.dialogs.values()) {
               // Native session IDs belong to the selected installation.
-              if (changedAgent) dialog.sessions[changedAgent] = null;
-              else dialog.sessions = Object.create(null);
+              if (changedAgent) { dialog.sessions[changedAgent] = null; dialog.sessionPlatforms[changedAgent] = null; }
+              else { dialog.sessions = Object.create(null); dialog.sessionPlatforms = Object.create(null); }
             }
           }
           if (name === "runtimeHost" || name === "wslDistro") Zotero.ZotAgent.runtimeManager.selectRuntimeProfile();
@@ -269,6 +271,11 @@
         if (health.ok) {
           const hData = await health.json();
           lines.unshift(runtimeStatus() + `\n活跃请求 ${hData.runningRequests}`);
+        }
+        const nodes = await Zotero.ZotAgent.runtimeManager.request("/v1/nodes", {}, 22000);
+        if (nodes.ok) {
+          const found = await nodes.json();
+          lines.push(`Node.js: Windows ${found.windows || "未找到"} · WSL ${found.wsl || "未找到"}`);
         }
         result.textContent = lines.join("\n");
       } catch (error) {

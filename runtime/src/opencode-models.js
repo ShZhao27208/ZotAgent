@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { statSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { nativePlatform } from './agent-launch.js';
+import { nativePlatform, toWSLPath } from './agent-launch.js';
 const clean = text => String(text).replace(/\x1b\[[0-9;]*m/g, '');
 export function parseModels(text) {
   return [...new Set(clean(text).split(/\r?\n/).map(s => s.trim()).filter(s => /^[\w.-]+\/[^\s]+$/.test(s)))];
@@ -133,9 +133,13 @@ export function createModelCatalog(launcher, { storePath = null } = {}) {
           saveStore(storePath, cache);
         }
         signal?.throwIfAborted();
+        // A Windows state directory is readable from WSL through /mnt; a WSL one
+        // seen from Windows is read inside the distribution.
         const data = location.platform === nativePlatform
           ? await readFile(path.join(value.state, 'model.json'), { encoding: 'utf8', signal })
-          : await command({ ...location, executable: '/bin/cat' }, [value.state.replace(/\/$/, '') + '/model.json'], signal);
+          : location.platform === 'windows'
+            ? await readFile(toWSLPath(value.state.replace(/[\\/]$/, '') + '\\model.json'), { encoding: 'utf8', signal })
+            : await command({ ...location, executable: '/bin/cat' }, [value.state.replace(/\/$/, '') + '/model.json'], signal);
         recent = recentModel(data);
       } catch (error) { if (signal?.aborted) throw signal.reason; recentError = error.message; }
       if (recent && !fresh && !value.models.includes(recent)) value = await load(false, signal);

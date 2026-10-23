@@ -5,3 +5,12 @@ dist/
 .runtime-token
 node_modules/
 .zotero-test/
+.omc/
+# Superseded release and fix notes; kept locally, see CHANGELOG.md.
+docs/RELEASE-*.md
+docs/FIX-*.md
+docs/PLAN-*.md
+docs/WINDOWS-INSTALL-*.md
+docs/RUNTIME-REGRESSION.md
+docs/PHASE0.md
+docs/VOICEOVER-SCRIPT.md

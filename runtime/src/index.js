@@ -4,9 +4,8 @@ import { spawn, execFile } from "node:child_process";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
-import { writeFileSync, mkdirSync, unlinkSync } from "node:fs";
-import { loadConfig } from "./config.js";
-import { statSync } from "node:fs";
+import { writeFileSync, mkdirSync, unlinkSync, statSync, readFileSync } from "node:fs";
+import { DATA_DIR, loadConfig } from "./config.js";
 import {
   envelope,
   isAuthorized,
@@ -35,38 +34,48 @@ import {
   resizePtySession,
 } from "./pty-manager.js";
 import { ptyShellArgs } from "./shell.js";
-import { createAgentLauncher, agentPlatform, nativePlatform, pathMatchesPlatform, toWSLPath } from "./agent-launch.js";
+import { createAgentLauncher, agentPlatform, nativePlatform, pathMatchesPlatform, toWSLPath, toWindowsPath } from "./agent-launch.js";
 
 import { createModelCatalog, selectModel } from "./opencode-models.js";
 
 import { runtimeBuildID } from "./runtime-identity.js";
 const buildID = runtimeBuildID();
+// The packaged Runtime carries its own package.json; a source checkout uses the project's.
+const runtimeVersion = [join(import.meta.dirname, "../package.json"), join(import.meta.dirname, "../../package.json")]
+  .map(file => { try { return JSON.parse(readFileSync(file, "utf8")).version; } catch { return null; } })
+  .find(Boolean) || "unknown";
 const config = loadConfig();
+const BARE_COMMANDS = { opencode: ["opencode"], codex: ["codex"], "claude-code": ["claude", "claude-code"] };
+
+class RequestError extends Error {
+  constructor(message, status = 400) { super(message); this.status = status; }
+}
 if (process.platform === "win32") {
   const { dirname, delimiter } = await import("node:path");
   process.env.Path = [dirname(process.execPath), process.env.APPDATA ? join(process.env.APPDATA, "npm") : "", process.env.Path || process.env.PATH || ""].filter(Boolean).join(delimiter);
 }
-let adapters = createAdapters(config.executables, config.platforms);
+// Capability lookup only; launches build an adapter from the resolved location.
+const platformAdapters = () => createAdapters({}, Object.fromEntries(Object.keys(config.platforms).map(name => [name, agentPlatform(config, name)])));
+let adapters = platformAdapters();
 const running = new Map();
 const preparing = new Map();
 const launcher = createAgentLauncher(config);
-const DATA_DIR = process.env.ZOTAGENT_DATA_DIR || join(process.env.USERPROFILE || process.env.HOME || "/tmp", ".local/share/zotero-full-agent");
 const modelCatalog = createModelCatalog(launcher, { storePath: join(DATA_DIR, "opencode-models.json") });
 const instanceID = randomUUID();
 let stopping = false;
 
 function validateRunRequest(body) {
   const agent = String(body.agent || "");
-  if (!adapters[agent]) throw new Error(`Unsupported agent: ${agent}`);
+  if (!adapters[agent]) throw new RequestError(`Unsupported agent: ${agent}`);
   const prompt = String(body.prompt || "");
-  if (!prompt.trim()) throw new Error("prompt is required");
+  if (!prompt.trim()) throw new RequestError("prompt is required");
   const adapter = adapters[agent];
   const rawCwd = String(body.cwd || "");
   const cwd = adapter.resolveCwd(
     rawCwd || (adapter.platform === "windows" ? config.defaultWindowsCwd : config.defaultCwd),
     config.defaultWindowsCwd,
   );
-  if (!isAbsolute(cwd) && !/^[a-z]:[\\/]/i.test(cwd)) throw new Error("cwd must be an absolute path");
+  if (!isAbsolute(cwd) && !/^[a-z]:[\\/]/i.test(cwd)) throw new RequestError("cwd must be an absolute path");
   return {
     requestID: String(body.requestID || randomUUID()),
     windowID: String(body.windowID || "unknown-window"),
@@ -78,6 +87,8 @@ function validateRunRequest(body) {
     nativeSessionID: body.nativeSessionID
       ? String(body.nativeSessionID)
       : null,
+    // System that owns nativeSessionID; an automatic Agent resumes there.
+    sessionPlatform: ["windows", "wsl"].includes(body.platform) ? body.platform : null,
     files: Array.isArray(body.files) ? body.files.map(String) : [],
     image: body.image ? String(body.image) : null,
   };
@@ -113,11 +124,19 @@ function assertSessionIdle(agent, nativeSessionID, resumePicker = false) {
   // Reserve this Agent while it is open so another window cannot write to it.
   const active = [...running.values(), ...preparing.values()].some(entry => entry.request.agent === agent && (resumePicker || nativeSessionID && entry.request.nativeSessionID === nativeSessionID));
   const terminal = listPtySessions().some(session => session.alive && session.agent === agent && (resumePicker || session.resumePicker || nativeSessionID && session.nativeSessionID === nativeSessionID));
-  if (active || terminal) throw new Error("该会话仍在执行、停止中或已在原生终端打开，请等待任务退出或先关闭原生终端");
+  if (active || terminal) throw new RequestError("该会话仍在执行、停止中或已在原生终端打开，请等待任务退出或先关闭原生终端");
+}
+
+// Map a working directory across the Windows/WSL boundary for the Agent's system.
+function agentCwd(cwd, location) {
+  if (location.platform === nativePlatform) return pathMatchesPlatform(cwd, location.platform) ? cwd : location.defaultCwd;
+  if (!cwd || cwd === config.defaultCwd || cwd === config.defaultWindowsCwd) return location.defaultCwd;
+  const mapped = location.platform === "wsl" ? toWSLPath(cwd) : toWindowsPath(cwd);
+  return pathMatchesPlatform(mapped, location.platform) ? mapped : location.defaultCwd;
 }
 
 async function prepareAndRun(request, response) {
-  if (running.has(request.requestID) || preparing.has(request.requestID)) throw new Error("重复的 requestID");
+  if (running.has(request.requestID) || preparing.has(request.requestID)) throw new RequestError("重复的 requestID");
   assertSessionIdle(request.agent, request.nativeSessionID);
   const controller = new AbortController();
   const entry = { request, controller };
@@ -147,7 +166,7 @@ async function runAgent(request, response, signal) {
   check();
   let abortResolve;
   const location = await Promise.race([
-    launcher.resolve(request.agent),
+    launcher.resolve(request.agent, { prefer: request.nativeSessionID ? request.sessionPlatform : null }),
     new Promise((_, reject) => {
       abortResolve = () => reject(signal.reason);
       signal.addEventListener("abort", abortResolve, { once: true });
@@ -155,10 +174,8 @@ async function runAgent(request, response, signal) {
     }),
   ]).finally(() => signal.removeEventListener("abort", abortResolve));
   check();
-  if (location.platform === "wsl" && process.platform === "win32") {
-    request.cwd = request.cwd === config.defaultCwd ? location.defaultCwd : toWSLPath(request.cwd);
-    if (!request.cwd.startsWith("/")) request.cwd = location.defaultCwd;
-  } else if (!pathMatchesPlatform(request.cwd, location.platform)) request.cwd = location.defaultCwd;
+  request.cwd = agentCwd(request.cwd, location);
+  request.platform = location.platform;
   if (request.agent === "opencode") {
     const catalog = await modelCatalog(location, false, { signal, recent: !request.model, model: request.model });
     check();
@@ -176,13 +193,14 @@ async function runAgent(request, response, signal) {
     request.files.push(imagePath);
     ownedFiles.add(imagePath);
   }
-  const adapter = createAdapters({ ...config.executables, [request.agent]: location.executable }, { ...config.platforms, [request.agent]: location.platform })[request.agent];
+  const adapter = createAdapters({ [request.agent]: location.executable }, { [request.agent]: location.platform })[request.agent];
   let invocation;
   try {
-    const mapped = location.platform === "wsl" && process.platform === "win32";
-    const input = mapped && request.agent !== "claude-code" ? { ...request, files: request.files.map(toWSLPath) } : request;
+    // Claude receives image bytes from this process; other Agents open files themselves.
+    const mapPath = location.platform === nativePlatform ? null : location.platform === "wsl" ? toWSLPath : value => toWindowsPath(value);
+    const input = mapPath && request.agent !== "claude-code" ? { ...request, files: request.files.map(mapPath) } : request;
     const built = adapter.buildInvocation(input);
-    if (mapped && request.agent === "claude-code") built.args = built.args.map(toWSLPath);
+    if (location.platform === "wsl" && mapPath && request.agent === "claude-code") built.args = built.args.map(toWSLPath);
     invocation = launcher.invocation(location, built, request.agent);
   }
   catch (error) { cleanup(); throw error; }
@@ -192,6 +210,7 @@ async function runAgent(request, response, signal) {
 
   writeEvent(response, envelope(request, "request.started", {
     cwd: request.cwd,
+    platform: request.platform,
     nativeSessionID: request.nativeSessionID,
   }));
   if (request.agent === "opencode") {
@@ -408,8 +427,8 @@ const server = http.createServer(async (request, response) => {
       }
       writeJSON(response, 200, {
         status: "ok",
-        protocolVersion: 7,
-        runtimeVersion: "0.6.1", buildID,
+        protocolVersion: 8,
+        runtimeVersion, buildID,
         service: "zotagent", instanceID,
         activeRequests: [...running.values(), ...preparing.values()].map(({ request }) => ({ agent: request.agent, requestID: request.requestID })),
         activeTerminals: listPtySessions().filter(s => s.alive).map(s => ({ agent: s.agent, id: s.id })),
@@ -430,6 +449,8 @@ const server = http.createServer(async (request, response) => {
           name,
           {
             ...(await collectVersion(adapter, name)),
+            // Installations on both systems, so each can be saved independently.
+            installations: await launcher.discoverAll(name),
             shell: config.shell,
             supportsImages: adapter.supportsImages,
             supportsApproval: adapter.supportsApproval,
@@ -439,29 +460,41 @@ const server = http.createServer(async (request, response) => {
       writeJSON(response, 200, Object.fromEntries(entries));
       return;
     }
+    if (request.method === "GET" && url.pathname === "/v1/nodes") {
+      const nodes = {};
+      for (const platform of ["windows", "wsl"]) {
+        try { nodes[platform] = await launcher.resolveNode(platform); } catch { nodes[platform] = null; }
+      }
+      writeJSON(response, 200, nodes);
+      return;
+    }
     if (request.method === "POST" && url.pathname === "/v1/config/agents") {
       const body = await readJSON(request);
-      const next = { ...config, platforms: { ...config.platforms }, executables: { ...config.executables } };
+      const next = { ...config, platforms: { ...config.platforms }, executables: { windows: { ...config.executables.windows }, wsl: { ...config.executables.wsl } } };
       if (typeof body.wslDistro === "string" && body.wslDistro.trim()) next.wslDistro = body.wslDistro.trim();
       for (const name of ["opencode", "codex", "claude-code"]) {
         const platform = body.platforms?.[name];
         if (["windows", "wsl", "auto"].includes(platform)) next.platforms[name] = platform;
-        if (Object.hasOwn(body.executables || {}, name)) {
-          const value = String(body.executables[name] || "").trim();
-          // Empty resets detection, including stale paths from another host.
-          if (value && !pathMatchesPlatform(value, agentPlatform(next, name))) throw new Error(`Invalid ${agentPlatform(next, name)} path for ${name}: ${value}`);
-          next.executables[name] = value;
+        // A flat { agent: path } body names paths on the Runtime's own system.
+        const flat = Object.hasOwn(body.executables || {}, name) ? { [nativePlatform]: { [name]: body.executables[name] } } : {};
+        for (const system of ["windows", "wsl"]) {
+          const source = flat[system] || body.executables?.[system];
+          if (!Object.hasOwn(source || {}, name)) continue;
+          const value = String(source[name] || "").trim();
+          // Empty or a bare command name resets to automatic detection.
+          if (!value || BARE_COMMANDS[name].includes(value)) { next.executables[system][name] = ""; continue; }
+          if (!pathMatchesPlatform(value, system)) throw new RequestError(`Invalid ${system} path for ${name}: ${value}`);
+          next.executables[system][name] = value;
         }
       }
       const changed = JSON.stringify([config.executables, config.platforms, config.wslDistro]) !== JSON.stringify([next.executables, next.platforms, next.wslDistro]);
       Object.assign(config, next);
       if (changed) { launcher.clear(); modelCatalog.clear(); }
-      adapters = createAdapters(config.executables, config.platforms);
+      adapters = platformAdapters();
       writeJSON(response, 200, {
         status: "updated",
         executables: config.executables,
         platforms: config.platforms,
-        commands: config.commands,
         shell: config.shell,
       });
       return;
@@ -538,19 +571,18 @@ const server = http.createServer(async (request, response) => {
       const onClose = () => { disconnected = true; };
       response.once("close", onClose);
       let location;
-      try { location = await launcher.resolve(agent); }
+      const preferred = body.sessionID && ["windows", "wsl"].includes(body.platform) ? body.platform : null;
+      try { location = await launcher.resolve(agent, { prefer: preferred }); }
       finally { response.removeListener("close", onClose); }
       // WSL discovery can outlast the client's wait; never start a terminal nobody can close.
       if (disconnected || response.destroyed) return;
-      const adapter = createAdapters({ ...config.executables, [agent]: location.executable }, { ...config.platforms, [agent]: location.platform })[agent];
-      let cwd = String(body.cwd || "") || location.defaultCwd;
-      if (location.platform === "wsl" && process.platform === "win32") cwd = cwd === config.defaultCwd ? location.defaultCwd : toWSLPath(cwd);
-      if (!pathMatchesPlatform(cwd, location.platform)) cwd = location.defaultCwd;
+      const adapter = createAdapters({ [agent]: location.executable }, { [agent]: location.platform })[agent];
+      const cwd = agentCwd(String(body.cwd || ""), location);
       const nativeSessionID = body.sessionID ? String(body.sessionID) : null;
       const interactive = adapter.interactiveArgs(nativeSessionID, cwd);
       assertSessionIdle(agent, nativeSessionID, interactive.resumePicker);
       const ptyInvocation = launcher.invocation(location, interactive, agent);
-      if (stopping) throw new Error("Runtime 正在停止");
+      if (stopping) throw new RequestError("Runtime 正在停止", 503);
       const session = createPtySession(ptyInvocation.command, ptyShellArgs(ptyInvocation), ptyInvocation.cwd, ptyInvocation.env || {}, { cols: body.cols, rows: body.rows, claimTimeoutMs: PTY_CLAIM_TIMEOUT_MS });
       const resumedID = agent === "opencode" || interactive.resumePicker ? null : nativeSessionID;
       session.agent = agent; session.nativeSessionID = resumedID;
@@ -605,8 +637,12 @@ const server = http.createServer(async (request, response) => {
     }
     writeJSON(response, 404, { error: "not found" });
   } catch (error) {
-    if (response.headersSent) { response.end(); }
-    else writeJSON(response, 400, { error: error.message });
+    if (response.headersSent) { response.end(); return; }
+    // Agent discovery and launch errors are configuration problems the user can
+    // fix (400); file-system failures in the Runtime itself are internal (500).
+    const status = error instanceof RequestError ? error.status : error.syscall && error.syscall !== "spawn" && !String(error.syscall).startsWith("spawn ") ? 500 : 400;
+    if (status >= 500) process.stderr.write(`[ZotAgent Runtime] ${request.method} ${request.url}: ${error.stack || error.message}\n`);
+    writeJSON(response, status, { error: error.message });
   }
 });
 

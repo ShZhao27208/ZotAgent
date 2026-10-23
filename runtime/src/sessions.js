@@ -1,12 +1,9 @@
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { randomUUID } from "node:crypto";
+import { DATA_DIR } from "./config.js";
 
-const STORE_DIR = process.env.ZOTAGENT_DATA_DIR || join(
-  process.env.USERPROFILE || process.env.HOME || "/tmp",
-  ".local/share/zotero-full-agent",
-);
-const STORE_PATH = join(STORE_DIR, "sessions.json");
+const STORE_PATH = join(DATA_DIR, "sessions.json");
 
 let cache = null;
 

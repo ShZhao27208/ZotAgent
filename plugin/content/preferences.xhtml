@@ -173,7 +173,7 @@
 
   <groupbox>
     <label><html:h2>Runtime</html:h2></label>
-    <html:p class="zotagent-help">插件会在首次启动时生成安全 Token。Windows 默认自动部署内置 Runtime、填写本机路径并使用已有 Node.js 启动；Agent 可分别选择 Windows 或 WSL；Windows 后端通过 wsl.exe 调用所选发行版内的 Agent。后端整体切换为 WSL 时需配置该环境的 Runtime 源码和 Node。</html:p>
+    <html:p class="zotagent-help">插件会在首次启动时生成安全 Token。Windows 默认自动部署内置 Runtime、填写本机路径并使用已有 Node.js 启动；Agent 可分别选择 Windows 或 WSL；Windows 后端通过 wsl.exe 调用所选发行版内的 Agent。后端切换为 WSL 时，Node 可留空，由 WSL 登录环境（含 NVM）自动查找；WSL 后端同样能启动 Windows Agent。</html:p>
     <checkbox
       id="zotagent-auto-start-runtime"
       label="启动 Zotero 时自动启动并连接 Runtime"
@@ -210,29 +210,35 @@
   <groupbox>
     <label><html:h2>Agent 命令</html:h2></label>
     <html:div class="zotagent-pref-grid">
-      <html:label for="zotagent-opencode-path">OpenCode</html:label>
-      <html:input id="zotagent-opencode-path" data-pref="opencodePath" />
+      <html:label for="zotagent-opencode-path-windows">OpenCode · Windows 路径</html:label>
+      <html:input id="zotagent-opencode-path-windows" data-pref="opencodePathWindows" placeholder="留空自动检测" />
+      <html:label for="zotagent-opencode-path-wsl">OpenCode · WSL 路径</html:label>
+      <html:input id="zotagent-opencode-path-wsl" data-pref="opencodePathWSL" placeholder="留空自动检测" />
       <html:label for="zotagent-opencode-platform">OpenCode 运行环境</html:label>
       <html:select id="zotagent-opencode-platform" data-pref="opencodePlatform">
-        <html:option value="auto">自动检测</html:option>
+        <html:option value="auto">自动（优先后端所在系统）</html:option>
         <html:option value="wsl">WSL (Linux)</html:option>
         <html:option value="windows">Windows</html:option>
       </html:select>
       <html:label for="zotagent-opencode-model">OpenCode 模型</html:label>
       <html:div class="zotagent-model-picker"><html:select id="zotagent-opencode-model" data-pref="opencodeModel"><html:option value="">跟随 OpenCode 最近使用的模型</html:option></html:select><button id="zotagent-refresh-models" label="刷新" /></html:div>
-      <html:label for="zotagent-codex-path">Codex CLI</html:label>
-      <html:input id="zotagent-codex-path" data-pref="codexPath" />
+      <html:label for="zotagent-codex-path-windows">Codex · Windows 路径</html:label>
+      <html:input id="zotagent-codex-path-windows" data-pref="codexPathWindows" placeholder="留空自动检测" />
+      <html:label for="zotagent-codex-path-wsl">Codex · WSL 路径</html:label>
+      <html:input id="zotagent-codex-path-wsl" data-pref="codexPathWSL" placeholder="留空自动检测" />
       <html:label for="zotagent-codex-platform">Codex 运行环境</html:label>
       <html:select id="zotagent-codex-platform" data-pref="codexPlatform">
-        <html:option value="auto">自动检测</html:option>
+        <html:option value="auto">自动（优先后端所在系统）</html:option>
         <html:option value="wsl">WSL (Linux)</html:option>
         <html:option value="windows">Windows</html:option>
       </html:select>
-      <html:label for="zotagent-claude-path">Claude Code</html:label>
-      <html:input id="zotagent-claude-path" data-pref="claudePath" />
+      <html:label for="zotagent-claude-path-windows">Claude Code · Windows 路径</html:label>
+      <html:input id="zotagent-claude-path-windows" data-pref="claudePathWindows" placeholder="留空自动检测" />
+      <html:label for="zotagent-claude-path-wsl">Claude Code · WSL 路径</html:label>
+      <html:input id="zotagent-claude-path-wsl" data-pref="claudePathWSL" placeholder="留空自动检测" />
       <html:label for="zotagent-claude-platform">Claude Code 运行环境</html:label>
       <html:select id="zotagent-claude-platform" data-pref="claudePlatform">
-        <html:option value="auto">自动检测</html:option>
+        <html:option value="auto">自动（优先后端所在系统）</html:option>
         <html:option value="wsl">WSL (Linux)</html:option>
         <html:option value="windows">Windows</html:option>
       </html:select>
@@ -243,7 +249,7 @@
         <html:option value="claude-code">Claude Code</html:option>
       </html:select>
     </html:div>
-    <html:p style="margin:4px 0 0;font-size:11px;color:#666;">自动选项跟随后端环境；选择 WSL 会在上方指定的发行版内检测和执行。切换环境后路径重新检测。OpenCode 未指定模型时读取同一环境的最近使用记录；无记录或模型已下架时提示重新选择，不回退到旧默认模型。</html:p>
+    <html:p style="margin:4px 0 0;font-size:11px;color:#666;">Windows 与 WSL 路径分别保存，切换运行环境不会清空另一边；留空时连接后自动检测并回填。“自动”优先使用后端所在系统，未安装时改用另一系统；各 Agent 可分别选择系统并同时使用。WSL 使用上方指定的发行版。OpenCode 未指定模型时读取同一环境的最近使用记录；无记录或模型已下架时提示重新选择，不回退到旧默认模型。</html:p>
     <hbox style="margin-top:8px;gap:6px;">
       <button id="zotagent-test-opencode" label="检测 OpenCode" />
       <button id="zotagent-test-codex" label="检测 Codex" />

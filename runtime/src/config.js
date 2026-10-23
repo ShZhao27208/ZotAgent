@@ -60,17 +60,12 @@ export function resolveFromPath(command, env = process.env, nodePath = process.e
   return command;
 }
 
-const DEFAULT_PATHS = {
-  opencode: resolveFromPath("opencode"),
-  codex: resolveFromPath("codex"),
-  "claude-code": resolveClaudePath(),
-};
+export const DATA_DIR = process.env.ZOTAGENT_DATA_DIR || join(
+  process.env.USERPROFILE || process.env.HOME || "/tmp",
+  ".local/share/zotero-full-agent",
+);
 
-const DEFAULT_PLATFORMS = {
-  opencode: process.platform === "win32" ? "windows" : "wsl",
-  codex: process.platform === "win32" ? "windows" : "wsl",
-  "claude-code": process.platform === "win32" ? "windows" : "wsl",
-};
+const nativeHost = process.platform === "win32" ? "windows" : "wsl";
 
 function readArg(name) {
   const index = process.argv.indexOf(name);
@@ -93,21 +88,21 @@ export function loadConfig() {
     wslDistro: process.env.ZOTAGENT_WSL_DISTRO || "Ubuntu",
     defaultCwd: process.env.ZOTAGENT_CWD || (process.platform === "win32" ? process.env.USERPROFILE || process.cwd() : process.env.HOME || "/tmp"),
     defaultWindowsCwd: process.env.ZOTAGENT_WIN_CWD || process.env.USERPROFILE || (process.platform === "win32" ? process.cwd() : "/mnt/c/Users"),
+    // Paths are kept per system so switching an Agent's system never discards
+    // the other installation. Empty means discover at launch time.
     executables: {
-      opencode: process.env.ZOTAGENT_OPENCODE || DEFAULT_PATHS.opencode,
-      codex: process.env.ZOTAGENT_CODEX || DEFAULT_PATHS.codex,
-      "claude-code":
-        process.env.ZOTAGENT_CLAUDE || DEFAULT_PATHS["claude-code"],
+      windows: {},
+      wsl: {},
+      [nativeHost]: {
+        opencode: process.env.ZOTAGENT_OPENCODE || "",
+        codex: process.env.ZOTAGENT_CODEX || "",
+        "claude-code": process.env.ZOTAGENT_CLAUDE || "",
+      },
     },
     platforms: {
-      opencode: process.env.ZOTAGENT_OPENCODE_PLATFORM || DEFAULT_PLATFORMS.opencode,
-      codex: process.env.ZOTAGENT_CODEX_PLATFORM || DEFAULT_PLATFORMS.codex,
-      "claude-code": process.env.ZOTAGENT_CLAUDE_PLATFORM || DEFAULT_PLATFORMS["claude-code"],
-    },
-    commands: {
-      opencode: process.env.ZOTAGENT_OPENCODE_COMMAND || "opencode",
-      codex: process.env.ZOTAGENT_CODEX_COMMAND || "codex",
-      "claude-code": process.env.ZOTAGENT_CLAUDE_COMMAND || "claude",
+      opencode: process.env.ZOTAGENT_OPENCODE_PLATFORM || "auto",
+      codex: process.env.ZOTAGENT_CODEX_PLATFORM || "auto",
+      "claude-code": process.env.ZOTAGENT_CLAUDE_PLATFORM || "auto",
     },
   };
 }

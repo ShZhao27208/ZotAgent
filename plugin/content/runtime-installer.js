@@ -12,7 +12,8 @@
   function findNode() {
     const env = Services.env;
     const configured = Zotero.Prefs.get('extensions.zotagent.runtimeNodePath', true);
-    if (configured) {
+    // "node" is the WSL profile default, not a Windows location.
+    if (configured && configured !== 'node') {
       try { const explicit = file(configured); if (explicit.exists() && explicit.isFile()) return explicit.path; } catch (_) {}
       throw new Error('手动配置的 Node.js 路径无效：' + configured + '；请修正路径或清空后自动查找。');
     }

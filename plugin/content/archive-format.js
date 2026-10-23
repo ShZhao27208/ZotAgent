@@ -112,8 +112,9 @@
     const color = { codex: "#245fa5", "claude-code": "#8755a4", opencode: "#256d3f" }[record.agent] || "#245fa5";
     const badge = text => `<strong><span style="color: ${color}; background-color: #edf2f7">${escape(text)}</span></strong>`;
     const metadata = text => `<span style="color: #52677b">${escape(text)}</span>`;
-    // Native note tables provide borders without relying on plugin stylesheets.
-    const frame = html => `<table><tbody><tr><td>${html}</td></tr></tbody></table>`;
+    // Zotero notes keep <hr> but drop its styles: a doubled rule marks record
+    // boundaries and a single rule separates sections inside a record.
+    const thick = "<hr/><hr/>", thin = "<hr/>";
     const source = (d, label) => d ? `<p><strong>${escape(label)}：</strong><a href="${escape(d.link)}">${escape(d.title)}</a>${escape([d.authors, d.year, d.doi && `DOI: ${d.doi}`].filter(Boolean).map(v => ` · ${v}`).join(""))}</p>` : "";
     const endLabel = record.status === "cancelled" ? "用户中断时间" : record.status === "completed" ? "回答完成时间" : "失败时间";
     const agent = AGENTS[record.agent] || record.agent;
@@ -123,31 +124,39 @@
     // Shift rendered headings only; code blocks and the original answer stay intact.
     const answer = record.answer ? markdown(record.answer).replace(/<(\/?)h([1-6])(\b[^>]*)>/g,
       (_, slash, level, attributes) => `<${slash}h${Math.min(Number(level) + 3, 6)}${attributes}>`) : "<p>尚未收到具体回答。</p>";
-    const heading = frame(`<h2 id="zotagent-record-${meta}">${badge("Agent · " + agent)}｜${escape(title)}</h2>`
-      + `<p>${escape(labels[record.status] || record.status)} · ${metadata(date(record.submittedAt))}</p>`);
-    const question = frame(`<h3>用户问题</h3><p>${escape(record.question).replaceAll("\n", "<br/>")}</p>`);
-    const response = frame(`<h3>${badge("Agent 回答 · " + agent)}</h3>${answer}`
-      + (record.failureSummary ? `<p>说明：${escape(record.failureSummary)}</p>` : ""));
-    const context = frame(`<h3>上下文与记录信息</h3>`
+    const heading = `<h2 id="zotagent-record-${meta}">${badge("Agent · " + agent)}｜${escape(title)}</h2>`
+      + `<p>${escape(labels[record.status] || record.status)} · ${metadata(date(record.submittedAt))}</p>`;
+    const question = `<h3>用户问题</h3><p>${escape(record.question).replaceAll("\n", "<br/>")}</p>`;
+    const response = `<h3>${badge("Agent 回答 · " + agent)}</h3>${answer}`
+      + (record.failureSummary ? `<p>说明：${escape(record.failureSummary)}</p>` : "");
+    const context = `<h3>上下文与记录信息</h3>`
       + `<p><strong>提问时间：</strong>${metadata(date(record.submittedAt))}<br/><strong>${escape(endLabel)}：</strong>${metadata(date(record.endedAt))}${record.model ? `<br/><strong>模型：</strong>${metadata(record.model)}` : ""}</p>`
       + source(record.primaryDocument, "主文献") + (record.references || []).map(d => source(d, "参考文献")).join("")
       + (record.targetDocument ? source(record.targetDocument, "本次分别处理文献") : "")
       + (record.fullTextAttachments || []).map(e => `<p>${escape(e.title)}<br/>${escape(fullTextDescription(e)).replaceAll("\n", "<br/>")}</p>`).join("")
       + (record.selection ? `<h4>选区${record.selectionLabel ? ` · ${escape(record.selectionLabel)}` : ""}</h4>${source(record.selectionDocument, "选区来源")}<p>${escape(record.selection).replaceAll("\n", "<br/>")}</p>` : "")
       + imageKeys.map(key => `<p><img data-attachment-key="${escape(key)}" alt="本次提问的 PDF 截图"/></p>`).join("")
-      + `<h6 id="zotagent-end-${escape(record.id)}">记录结束</h6>`);
-    return frame([heading, question, response, context].join(""));
+      + `<h6 id="zotagent-end-${escape(record.id)}">记录结束</h6>`;
+    return thick + [heading, question, response, context].join(thin) + thick;
   }
 
   function noteBody(doc) { return doc.body.querySelector(":scope > div[data-schema-version], :scope > div.zotero-note") || doc.body; }
   function recordsIn(doc) {
     const body = noteBody(doc), found = [], ids = new Set();
-    let active = null;
+    let active = null, leading = [], trailing = null, trailingRules = 0;
     for (const node of body.childNodes) {
+      // The doubled boundary rules belong to the adjacent record so sorting
+      // moves them with it: two rules before the title, two after the end mark.
+      const isRule = node.nodeType === 1 && node.localName === "hr";
+      if (trailing) {
+        if (isRule && trailingRules < 2) { trailing.push(node); trailingRules++; continue; }
+        trailing = null;
+      }
+      if (!active && isRule) { leading = [...leading, node].slice(-2); continue; }
       let id = node.nodeType === 1 ? node.getAttribute("id") || "" : "";
       let endID = id;
-      // New records are one outer table; legacy records remain sibling blocks.
-      // Keep identity on headings, as in existing notes, for editor serialization.
+      // 0.6.x records are one outer table; older and current records are sibling
+      // blocks. Keep identity on headings, as in existing notes, for editor serialization.
       if (node.nodeType === 1 && node.localName === "table") {
         const starts = node.querySelectorAll('[id^="zotagent-record-"]');
         const ends = node.querySelectorAll('[id^="zotagent-end-"]');
@@ -164,13 +173,17 @@
         let meta;
         try { meta = JSON.parse(decodeURIComponent(id.slice(16))); } catch { throw new Error("归档记录标记无法识别"); }
         if (!meta.id || !Number.isFinite(meta.asked) || !Number.isFinite(meta.ended) || ids.has(meta.id)) throw new Error("归档记录标记重复或无效");
-        ids.add(meta.id); active = { meta, nodes: [] };
+        ids.add(meta.id); active = { meta, nodes: [...leading] }; leading = [];
       }
       if (active) active.nodes.push(node);
       if (endID.startsWith("zotagent-end-")) {
         if (!active || endID !== `zotagent-end-${active.meta.id}`) throw new Error("归档记录边界不完整，请保留现有笔记并检查记录标题");
-        found.push(active); active = null;
+        found.push(active);
+        // Only a ruled record owns closing rules; older layouts have none, and
+        // the rules after them open the next record.
+        trailing = active.nodes[0]?.localName === "hr" ? active.nodes : null; trailingRules = 0; active = null;
       }
+      if (!active && !id.startsWith("zotagent-record-")) leading = [];
     }
     if (active) throw new Error("归档记录缺少结束标题，请恢复后重试");
     return found;

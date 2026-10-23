@@ -26,7 +26,13 @@ export function shellDescriptor(env = process.env, platform = process.platform) 
 
 function quotePosix(value) { return `'${String(value).replaceAll("'", "'\\''")}'`; }
 function quotePowerShell(value) { return `'${String(value).replaceAll("'", "''")}'`; }
-function quoteCmd(value) { return `"${String(value).replaceAll("%", "%%").replaceAll('"', '\\"')}"`; }
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
+// Quote for the target's argv parser, then caret-escape every cmd metacharacter
+// so cmd never toggles its quote state or expands %VAR% inside an argument.
+function quoteCmd(value) {
+  const quoted = `"${String(value).replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, "$1$1")}"`;
+  return quoted.replace(CMD_META, "^$1");
+}
 
 export function shellInvocation(shell, command, args = []) {
   const name = shell?.name || detectShell();

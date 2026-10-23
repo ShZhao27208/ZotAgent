@@ -1,3 +1,24 @@
+## 0.7.0 - 2026-10-23
+
+### Agent 环境
+- Windows 与 WSL 的 Agent 路径分别保存（每个 Agent 两个字段），切换运行环境不再清空另一边；连接后两个系统同时检测并分别回填，已填写的路径不会被覆盖。
+- 各 Agent 可分别选择 Windows 或 WSL 并同时使用。“自动”优先使用后端所在系统，未安装时改用另一系统；恢复会话时留在会话所属的系统。
+- WSL 后端现在也能通过 Windows 互操作启动 Windows Agent；Windows 后端仍通过 `wsl.exe` 启动 WSL Agent。工作目录在 `C:\…`、`/mnt/c/…`、`\\wsl.localhost\…` 之间自动转换。
+- “检测连接”同时列出 Windows 与 WSL 的 Node.js。WSL 后端的 Node 可留空，由 WSL 登录环境（含 NVM）查找，不再误用 `/mnt/…/node.exe`。
+- 路径默认值改为空。旧版本残留的 `codex`、`claude` 等命令名按“自动检测”处理，不再阻止检测结果回填；旧设置自动迁移。
+
+### 归档笔记
+- 去掉表格外框：每条记录上下各用两条分隔线与其他记录隔开，记录内部各部分之间用一条分隔线。排序时分隔线随记录移动；已有的无框记录和 0.6.x 带框记录照常识别。Markdown 导出时双线合并为一条。
+
+### 修复与维护
+- Windows 上经 `cmd.exe` 启动 npm 包装脚本时，参数中的引号、`&`、`|`、`%变量%` 原样传递，不再被 cmd 解释。
+- Runtime 健康检查报告的版本号与插件一致（此前固定为 0.6.1）；协议版本升至 8。
+- 请求参数错误返回 400，内部系统错误返回 500 并写入 Runtime 日志；数据目录只在一处计算。
+- 依赖版本固定，新增 `npm run coverage`（Node 内置覆盖率）。旧发布与修复说明文档不再随仓库发布。
+
+### 验证边界
+- 在 WSL 中实测：同时检测到 Windows 与 WSL 的 OpenCode、两个系统的 Node，并从 WSL 后端成功启动 Windows OpenCode（`--version`）。cmd 转义在 Windows Node 下用 npm 风格包装脚本实测通过。Windows Zotero 界面内的交互与归档显示尚未实测。
+
 ## 0.6.2 - 2026-10-11
 
 ### 改进
@@ -72,7 +93,7 @@
 - Last automated run: 124 passed, 1 skipped (125 total). No new test run performed after the user requested tests stop.
 - Native Zotero 10.0.3 archive smoke test failed its saved-record-count assertion; real editor, image export and sync acceptance remain incomplete.
 - Windows/WSL environment and path mismatch, Windows OpenCode exit code 1, and incomplete PowerShell prompt transmission remain under investigation.
-- This version snapshots the current implementation at the user’s request before addressing those issues. See `docs/RELEASE-0.4.0.md`.
+- This version snapshots the current implementation at the user’s request before addressing those issues.
 
 ## 0.3.10 - 2026-09-24
 
