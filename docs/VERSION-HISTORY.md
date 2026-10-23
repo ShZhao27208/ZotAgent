@@ -2,9 +2,9 @@
 
 > 本文件记录本地可见的 Git 历史（含推送前待发布提交），不代表 GitHub 每次 push 的事件日志。推送前 hook 自动更新本地历史；实际推送成功后在文末独立记录，可随下一批修改提交。
 
-- 历史截至：2026-10-09T20:53:14+08:00
+- 历史截至：2026-10-11T23:59:17+08:00
 - 项目：`ShZhao27208/ZotAgent`
-- 可见提交：68 个（按 Git 提交时间升序）
+- 可见提交：69 个（按 Git 提交时间升序）
 - 时间：ISO 8601，带时区
 
 ## 远端分支与标签
@@ -24,6 +24,7 @@
 | `v0.4.3` | `9804bfd25f06` | 2026-09-26T02:59:34+08:00 | feat: select archive notes and restore native agent sessions v0.4.3 |
 | `v0.4.4` | `6983166c4c97` | 2026-09-26T03:53:01+08:00 | fix: show structured sessions in native resume pickers v0.4.4 |
 | `v0.6.1` | `3d9fbeb2e862` | 2026-10-09T20:53:14+08:00 | chore: release v0.6.1 |
+| `v0.6.2` | `bdbaed37ed47` | 2026-10-11T23:59:17+08:00 | chore: release v0.6.2 with compact framed archive layout |
 
 ## 正式版本
 
@@ -56,6 +57,7 @@
 | `0.4.3` | 2026-09-26T02:59:34+08:00 | `9804bfd` | feat: select archive notes and restore native agent sessions v0.4.3 |
 | `0.4.4` | 2026-09-26T03:53:01+08:00 | `6983166` | fix: show structured sessions in native resume pickers v0.4.4 |
 | `0.6.1` | 2026-10-09T20:53:14+08:00 | `3d9fbeb` | chore: release v0.6.1 |
+| `0.6.2` | 2026-10-11T23:59:17+08:00 | `bdbaed3` | chore: release v0.6.2 with compact framed archive layout |
 
 ## 本地可见提交
 
@@ -131,6 +133,7 @@
 | 66 | 2026-10-09T20:51:24+08:00 | `0.6.0` | `9b91577` | feat: frame archived questions and answers in notes |
 | 67 | 2026-10-09T20:51:24+08:00 | `0.6.0` | `2cd6223` | test: cover framed archive records and Markdown export |
 | 68 | 2026-10-09T20:53:14+08:00 | `0.6.1` | `3d9fbeb` | chore: release v0.6.1 |
+| 69 | 2026-10-11T23:59:17+08:00 | `0.6.2` | `bdbaed3` | chore: release v0.6.2 with compact framed archive layout |
 
 ## 维护规则
 
@@ -244,3 +247,15 @@
 - 预览版及安装包：https://github.com/ShZhao27208/ZotAgent/releases/tag/v0.6.1 ；上传后 GitHub 返回的 digest 与本地 SHA-256 一致。
 - 预先存在的 README 删除与未跟踪文件未纳入提交。
 - 本条为推送成功后的本地记录，留待下一批修改纳入，不为记录自身重复提交。
+
+### 0.6.2 — 紧凑双层归档布局
+
+- 推送、发布成功并核对后的记录时间：2026-10-12T00:00:32+08:00（Asia/Shanghai，非追溯的精确网络完成时刻）。
+- 提交：`bdbaed37ed47a91c57547d9791a63f827cf0f858`；Git committer 时间：2026-10-11T23:59:17+08:00。
+- 远端：`origin` / `git@github.com:ShZhao27208/ZotAgent.git`；分支 `fix/auto-detect-runtime-and-cli-paths` 与标签 `v0.6.2` 已推送，git ls-remote 核对两者均指向上述提交。
+- 内容：一次问答整体外框，内部记录标题、用户问题、Agent 回答、上下文与记录信息四框紧凑排列，不插入空白段落；回答标题降级，旧记录兼容，不调用模型、不额外消耗 token。
+- 验证：181 项，180 通过，1 项 Windows 专用测试跳过；构建、安装包一致性、diff 格式检查通过。Zotero 原生编辑器保存重开显示效果尚未实测。
+- 安装包：`dist/zotagent-0.6.2.xpi`，14094885 字节；SHA-256 `c1b1922cec7b4060bc8583687e483a76666068037e6c95f37875cf6517ba0d20`。GitHub 上传状态、大小及 digest 均已核对。
+- GitHub 预览版及安装包：https://github.com/ShZhao27208/ZotAgent/releases/tag/v0.6.2。
+- 预先存在的 README 段落删除与无关未跟踪文件未纳入提交。
+- 本条为推送后的本地记录，留待下一完整批次提交，不为记录自身重复推送。
