@@ -2,9 +2,9 @@
 
 > 本文件记录本地可见的 Git 历史（含推送前待发布提交），不代表 GitHub 每次 push 的事件日志。推送前 hook 自动更新本地历史；实际推送成功后在文末独立记录，可随下一批修改提交。
 
-- 历史截至：2026-10-11T23:59:17+08:00
+- 历史截至：2026-10-23T13:00:24+08:00
 - 项目：`ShZhao27208/ZotAgent`
-- 可见提交：69 个（按 Git 提交时间升序）
+- 可见提交：71 个（按 Git 提交时间升序）
 - 时间：ISO 8601，带时区
 
 ## 远端分支与标签
@@ -25,6 +25,7 @@
 | `v0.4.4` | `6983166c4c97` | 2026-09-26T03:53:01+08:00 | fix: show structured sessions in native resume pickers v0.4.4 |
 | `v0.6.1` | `3d9fbeb2e862` | 2026-10-09T20:53:14+08:00 | chore: release v0.6.1 |
 | `v0.6.2` | `bdbaed37ed47` | 2026-10-11T23:59:17+08:00 | chore: release v0.6.2 with compact framed archive layout |
+| `v0.7.0` | `9443c7d349b3` | 2026-10-23T13:00:32+08:00 | ZotAgent 0.7.0 |
 
 ## 正式版本
 
@@ -58,6 +59,7 @@
 | `0.4.4` | 2026-09-26T03:53:01+08:00 | `6983166` | fix: show structured sessions in native resume pickers v0.4.4 |
 | `0.6.1` | 2026-10-09T20:53:14+08:00 | `3d9fbeb` | chore: release v0.6.1 |
 | `0.6.2` | 2026-10-11T23:59:17+08:00 | `bdbaed3` | chore: release v0.6.2 with compact framed archive layout |
+| `0.7.0` | 2026-10-23T13:00:32+08:00 | `9443c7d349b3` | ZotAgent 0.7.0 |
 
 ## 本地可见提交
 
@@ -134,6 +136,8 @@
 | 67 | 2026-10-09T20:51:24+08:00 | `0.6.0` | `2cd6223` | test: cover framed archive records and Markdown export |
 | 68 | 2026-10-09T20:53:14+08:00 | `0.6.1` | `3d9fbeb` | chore: release v0.6.1 |
 | 69 | 2026-10-11T23:59:17+08:00 | `0.6.2` | `bdbaed3` | chore: release v0.6.2 with compact framed archive layout |
+| 70 | 2026-10-23T13:00:24+08:00 | `0.7.0` | `ec0e703` | feat: run Windows and WSL agents side by side and use ruled archive records |
+| 71 | 2026-10-23T13:00:24+08:00 | `0.7.0` | `b16f52f` | test: cover per-system agent paths, cmd escaping and ruled archive records |
 
 ## 维护规则
 
@@ -258,4 +262,15 @@
 - 安装包：`dist/zotagent-0.6.2.xpi`，14094885 字节；SHA-256 `c1b1922cec7b4060bc8583687e483a76666068037e6c95f37875cf6517ba0d20`。GitHub 上传状态、大小及 digest 均已核对。
 - GitHub 预览版及安装包：https://github.com/ShZhao27208/ZotAgent/releases/tag/v0.6.2。
 - 预先存在的 README 段落删除与无关未跟踪文件未纳入提交。
+- 本条为推送后的本地记录，留待下一完整批次提交，不为记录自身重复推送。
+
+### 0.7.0 — Windows 与 WSL Agent 并行、分隔线归档
+
+- 推送、发布成功并核对后的记录时间：2026-10-23T13:01:24+08:00（Asia/Shanghai，非追溯的精确网络完成时刻）。
+- 提交：`ec0e703`（实现）、`b16f52f`（测试）、`db40f49`（补记 0.6.2 推送记录）；HEAD `db40f49e6bbad432af76f586c27afedf430e6914`，Git committer 时间：2026-10-23T13:00:32+08:00。
+- 远端：`origin` / `git@github.com:ShZhao27208/ZotAgent.git`；分支 `fix/auto-detect-runtime-and-cli-paths` 与标签 `v0.7.0` 已推送，git ls-remote 核对两者均指向上述 HEAD。
+- 内容：Windows 与 WSL 的 Agent 路径分别保存、同时检测并回填，各 Agent 可分别选择系统并同时使用；WSL 后端可经互操作启动 Windows Agent；检测连接列出两个系统的 Node.js；旧默认命令名不再阻止回填。归档记录去掉表格外框，记录间双分隔线、内部单分隔线。修复 cmd.exe 参数转义；Runtime 报告真实版本，协议 8；内部错误返回 500；数据目录统一；依赖版本固定，新增覆盖率脚本；旧发布与修复说明不再随仓库发布（本地保留）。
+- 验证：183 项，182 通过，1 项 Windows 专用测试跳过；构建与安装包一致性检查通过。WSL 中实测双系统检测、从 WSL 后端启动 Windows OpenCode，cmd 转义在 Windows Node 下实测。Windows Zotero 界面交互与归档显示尚未实测。
+- 安装包：`dist/zotagent-0.7.0.xpi`，14100875 字节；SHA-256 `4c07f0c25ef242b3f9e1e6e4538696d23b4190a635ae3150b4d05b2594b9a23e`。GitHub 上传大小及 digest 已核对。
+- GitHub 预览版及安装包：https://github.com/ShZhao27208/ZotAgent/releases/tag/v0.7.0。
 - 本条为推送后的本地记录，留待下一完整批次提交，不为记录自身重复推送。

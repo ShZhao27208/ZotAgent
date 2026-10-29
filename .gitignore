@@ -14,3 +14,28 @@ docs/WINDOWS-INSTALL-*.md
 docs/RUNTIME-REGRESSION.md
 docs/PHASE0.md
 docs/VOICEOVER-SCRIPT.md
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+# Reports, caches and editor/OS leftovers
+coverage/
+.nyc_output/
+.cache/
+__pycache__/
+*.pyc
+*.tmp
+*.swp
+*.swo
+*~
+*.bak
+.DS_Store
+Thumbs.db
+Desktop.ini
+*:Zone.Identifier
+.vscode/
+.idea/
+# Local research outputs (not plugin sources)
+sci-search-out/

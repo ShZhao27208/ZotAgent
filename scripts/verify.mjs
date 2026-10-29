@@ -57,6 +57,16 @@ for (const script of scripts.filter(name => name.startsWith("plugin/"))) {
   if (!entries.get(script.slice(7))?.equals(source)) throw new Error(`Stale XPI source: ${script}`);
 }
 const runtime = unzip(entries.get("runtime.zip"));
+const license = await fs.readFile(path.join(root, "LICENSE"));
+if (packageJSON.license !== "Apache-2.0" || !entries.get("LICENSE")?.equals(license) || !runtime.get("LICENSE")?.equals(license))
+  throw new Error("Missing or stale Apache 2.0 license");
+if (!entries.get("content/vendor/xterm-LICENSE")?.equals(await fs.readFile(path.join(root, "node_modules/@xterm/xterm/LICENSE"))))
+  throw new Error("Missing xterm license");
+const forbidden = /(?:^|\/)(?:\.env(?:\.[^/]*)?|\.git|\.omc|\.zotero-test|coverage|test|tests)(?:\/|$)|(?:\.log|\.tmp|\.bak|:Zone\.Identifier)$/i;
+for (const [label, archive] of [["XPI", entries], ["Runtime", runtime]]) {
+  for (const name of archive.keys()) if (forbidden.test(name)) throw new Error(`${label} contains local-only file: ${name}`);
+}
+
 const { runtimeBuildID } = await import("../runtime/src/runtime-identity.js");
 if (!entries.get("content/runtime-build.js").toString().includes(runtimeBuildID())) throw new Error("Stale Runtime build identity");
 for (const name of ["src/index.js", "src/runtime-identity.js", "src/protocol.js", "src/opencode-models.js", "src/normalize.js", "src/agent-launch.js", "src/config.js", "src/adapters/claude.js", "src/adapters/codex.js", "src/adapters/opencode.js", "src/pty-manager.js"]) {

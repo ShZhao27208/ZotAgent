@@ -722,6 +722,17 @@
       return Boolean(element.isContentEditable || tag === "textarea" || (tag === "input" && /^(text|search|url|email|tel)?$/.test(element.type || "text")));
     }
 
+    static savedAnswerHTML(value) {
+      if (typeof value === "string") return markdownToNoteHTML(value);
+      const agent = Zotero.ZotAgent.archiveFormat.AGENTS[value.agent] || value.agent || "Agent";
+      const frame = html => `<table><tbody><tr><td>${html}</td></tr></tbody></table>`;
+      const answer = markdownToNoteHTML(value.text || "").replace(/<(\/?)h([1-6])(\b[^>]*)>/g,
+        (_, slash, level, rest) => `<${slash}h${Math.min(Number(level) + 2, 6)}${rest}>`);
+      return `<h1>ZotAgent · ${escapeHTML(agent)}</h1>`
+        + frame(`<h2>用户问题</h2><p>${escapeHTML(value.question ?? "历史记录未保存对应问题").replaceAll("\n", "<br/>")}</p>`)
+        + frame(`<h2>Agent 回答 · ${escapeHTML(agent)}</h2>${answer}`);
+    }
+
     static async createChildNote(context, markdown) {
       const parent = context?.topItem;
       if (!parent || parent.libraryID === undefined || parent.libraryID === null) {
@@ -730,7 +741,7 @@
       const note = new Zotero.Item("note");
       note.libraryID = parent.libraryID;
       note.parentID = parent.id;
-      note.setNote(markdownToNoteHTML(markdown));
+      note.setNote(this.savedAnswerHTML(markdown));
       await note.saveTx();
       return note;
     }
@@ -742,7 +753,7 @@
       const note = new Zotero.Item("note");
       note.libraryID = first.libraryID;
       note.parentID = first.id;
-      note.setNote(markdownToNoteHTML(markdown));
+      note.setNote(this.savedAnswerHTML(markdown));
       await note.saveTx();
       for (let i = 1; i < items.length; i++) {
         const related = items[i].topItem;
@@ -754,7 +765,7 @@
 
     static async saveWithConfirmation(dialog, context, markdown) {
       if (pref("autoSaveNotes", false)) {
-        if (context?.items?.length > 1 && dialog._multiMode !== "separate") {
+        if (context?.items?.length > 1) {
           return this.createCombinedNote(context, markdown);
         }
         return this.createChildNote(context, markdown);
@@ -1304,15 +1315,16 @@
       this.ptyContainer.append(this.terminalInfo, this.ptyOutput, this.ptyInput);
 
       const actions = createElement(this.doc, "footer", "zotagent-actions");
-      const copy = createElement(this.doc, "button", "zotagent-small-button", "复制 Markdown");
-      copy.addEventListener("click", () => this.copyLastAnswer());
-      const insert = createElement(this.doc, "button", "zotagent-small-button", "插入光标");
-      insert.addEventListener("click", () => this.insertLastAnswer());
-      const save = createElement(this.doc, "button", "zotagent-small-button", "保存子笔记");
-      save.addEventListener("click", () => this.saveLastAnswer());
+      for (const [label, action] of [["复制 Markdown", "copyLastAnswer"], ["插入光标", "insertLastAnswer"], ["保存子笔记", "saveLastAnswer"]]) {
+        const button = createElement(this.doc, "button", "zotagent-small-button", label);
+        button.addEventListener("click", () => {
+          Promise.resolve(this[action]()).catch(error => this.renderStatus(error.message, true));
+        });
+        actions.appendChild(button);
+      }
       const history = createElement(this.doc, "button", "zotagent-small-button", "历史");
       history.addEventListener("click", () => this.showHistoryPanel());
-      actions.append(copy, insert, save, history);
+      actions.append(history);
 
       const contextDetails = createElement(this.doc, "div", "zotagent-context-details");
       contextDetails.append(executionBar, this.contextBar, this.selectionBox, this.refBar, this.extraItemsList, this.fullTextStatus);
@@ -1986,11 +1998,22 @@
       this.element.appendChild(panel);
     }
 
-    addMessage(role, text) {
-      const item = { role, text, agent: this.agent };
+    addMessage(role, text, metadata = {}) {
+      const question = [...this.messages].reverse().find(m => m.role === "user")?.text;
+      const documents = (this.context?.items || (this.context ? [this.context] : [])).map(c =>
+        ({ libraryID: c.topItem.libraryID, key: c.topItem.key }));
+      const item = { role, text, agent: this.agent, ...(role === "assistant" ? { question, documents } : {}), ...metadata };
       this.messages.push(item);
       const element = createElement(this.doc, "div", `zotagent-message is-${role}`);
       element.textContent = text;
+      if (role === "assistant") {
+        element.tabIndex = 0;
+        element.title = "右键：复制 Markdown、插入光标、保存子笔记";
+        element.addEventListener("contextmenu", event => {
+          event.preventDefault(); event.stopPropagation();
+          this.showAnswerMenu(event, item, element);
+        });
+      }
       this.messagesElement.appendChild(element);
       this.messagesElement.scrollTop = this.messagesElement.scrollHeight;
       return { item, element };
@@ -2133,6 +2156,8 @@
       this.requestID = request.id;
       const assistant = this.addMessage("assistant", "");
       assistant.item.agent = batch.agent;
+      assistant.item.question = batch.question;
+      assistant.item.documents = contexts.filter(c => c.topItem).map(c => ({ libraryID: c.topItem.libraryID, key: c.topItem.key }));
       const visible = () => this._activeBatch === batch && !request.finalized;
       const check = () => { if (batch.cancelled || request.finalized) { const error = new Error("用户已中断"); error.name = "AbortError"; throw error; } };
       try {
@@ -2214,11 +2239,11 @@
         if (request.status === "completed" && request.answer) {
           try {
             if (pref("autoInsertAtCursor", false) && !NoteService.insertAtActiveCursor(request.answer)) this.renderStatus(NoteService.lastInsertError, true);
-            if (pref("autoSaveNotes", false) && contexts[0]?.topItem) await NoteService.createChildNote(contexts[0], request.answer);
+            if (pref("autoSaveNotes", false) && contexts[0]?.topItem) await NoteService.createChildNote(contexts[0], assistant.item);
           } catch (error) { this.renderStatus(`回答完成，单独保存/插入失败：${error.message}`, true); }
         }
         const session = this.sessions[batch.agent];
-        if (!batch.separate && session) SessionHistory.updateMessages(batch.agent, session, this.messages.filter(m => !m.agent || m.agent === batch.agent).map(m => ({ role: m.role, text: m.text, agent: batch.agent })));
+        if (!batch.separate && session) SessionHistory.updateMessages(batch.agent, session, this.messages.filter(m => !m.agent || m.agent === batch.agent).map(m => ({ role: m.role, text: m.text, agent: m.agent, question: m.question, documents: m.documents })));
       }
       return request;
     }
@@ -2269,12 +2294,66 @@
       this.renderStatus("已中断，已保留收到的回答");
     }
 
+    dismissAnswerMenu() {
+      this._answerMenuCleanup?.();
+      this._answerMenuCleanup = null;
+    }
+
+    showAnswerMenu(event, message, element) {
+      this.doc.querySelector(".zotagent-answer-menu")?.dispatchEvent(new this.doc.defaultView.Event("dismiss"));
+      this.dismissAnswerMenu();
+      const menu = createElement(this.doc, "div", "zotagent-answer-menu");
+      menu.setAttribute("role", "menu");
+      menu.setAttribute("aria-label", "Agent 回答操作");
+      const buttons = [];
+      for (const [label, action] of [["复制 Markdown", "copyLastAnswer"], ["插入光标", "insertLastAnswer"], ["保存子笔记", "saveLastAnswer"]]) {
+        const button = createElement(this.doc, "button", "", label);
+        button.type = "button"; button.setAttribute("role", "menuitem");
+        button.disabled = !message.text;
+        button.addEventListener("mousedown", e => e.preventDefault());
+        button.addEventListener("click", () => {
+          this.dismissAnswerMenu();
+          Promise.resolve(this[action](message)).catch(error => this.renderStatus(error.message, true));
+        });
+        menu.appendChild(button); buttons.push(button);
+      }
+      const close = e => { if (!menu.contains(e.target)) this.dismissAnswerMenu(); };
+      const key = e => {
+        if (e.key === "Escape") { e.preventDefault(); this.dismissAnswerMenu(); element.focus(); }
+        else if (["ArrowDown", "ArrowUp"].includes(e.key)) {
+          e.preventDefault();
+          const i = buttons.indexOf(this.doc.activeElement);
+          buttons[(i + (e.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length].focus();
+        } else if (e.key === "Tab") this.dismissAnswerMenu();
+      };
+      const dismiss = () => this.dismissAnswerMenu();
+      this._answerMenuCleanup = () => {
+        menu.remove();
+        this.doc.removeEventListener("pointerdown", close, true);
+        this.doc.removeEventListener("keydown", key, true);
+        this.doc.removeEventListener("scroll", dismiss, true);
+        this.win.removeEventListener("blur", dismiss);
+        this.win.removeEventListener("resize", dismiss);
+      };
+      menu.addEventListener("dismiss", dismiss);
+      this.doc.addEventListener("pointerdown", close, true);
+      this.doc.addEventListener("keydown", key, true);
+      this.doc.addEventListener("scroll", dismiss, true);
+      this.win.addEventListener("blur", dismiss);
+      this.win.addEventListener("resize", dismiss);
+      this.controller.layer.appendChild(menu);
+      const rect = element.getBoundingClientRect?.() || { left: 12, bottom: 12 };
+      const width = menu.offsetWidth || 180, height = menu.offsetHeight || 112;
+      menu.style.left = `${Math.max(0, Math.min(event.clientX || rect.left, (this.win.innerWidth || 1024) - width))}px`;
+      menu.style.top = `${Math.max(0, Math.min(event.clientY || rect.bottom, (this.win.innerHeight || 800) - height))}px`;
+    }
+
     lastAnswer() {
       return [...this.messages].reverse().find((message) => message.role === "assistant" && message.text)?.text || "";
     }
 
-    async copyLastAnswer() {
-      const answer = this.lastAnswer();
+    async copyLastAnswer(message) {
+      const answer = message ? message.text : this.lastAnswer();
       if (!answer) return this.renderStatus("没有可复制的回答", true);
       if (Zotero.Utilities?.Internal?.copyTextToClipboard) {
         Zotero.Utilities.Internal.copyTextToClipboard(answer);
@@ -2284,8 +2363,8 @@
       this.renderStatus("Markdown 已复制");
     }
 
-    async insertLastAnswer() {
-      const answer = this.lastAnswer();
+    async insertLastAnswer(message) {
+      const answer = message ? message.text : this.lastAnswer();
       if (!answer) return this.renderStatus("没有可插入的回答", true);
       try {
         const reader = this.controller.getReader?.();
@@ -2304,11 +2383,16 @@
       this.renderStatus(inserted ? "已插入当前笔记" : NoteService.lastInsertError, !inserted);
     }
 
-    async saveLastAnswer() {
-      const answer = this.lastAnswer();
-      if (!answer) return this.renderStatus("没有可保存的回答", true);
+    async saveLastAnswer(message = [...this.messages].reverse().find(m => m.role === "assistant" && m.text)) {
+      if (!message?.text) return this.renderStatus("没有可保存的回答", true);
       try {
-        await NoteService.saveWithConfirmation(this, this.context, answer);
+        const items = (message.documents || []).map(d => {
+          const topItem = Zotero.Items.getByLibraryAndKey(d.libraryID, d.key);
+          if (!topItem || topItem.deleted) throw new Error("回答对应的文献已不存在，无法保存子笔记");
+          return { topItem, title: topItem.getField("title") };
+        });
+        if (!items.length) throw new Error("这条回答没有关联文献，无法保存子笔记");
+        await NoteService.saveWithConfirmation(this, { ...items[0], items }, { ...message });
       } catch (error) {
         this.renderStatus(error.message, true);
       }
@@ -2375,6 +2459,7 @@
       const agentSelect = this.element.querySelector(".zotagent-agent-select");
       if (agentSelect) agentSelect.value = entry.agent;
       this.element.dataset.agent = entry.agent;
+      this.dismissAnswerMenu();
       this.messagesElement.innerHTML = "";
       this.messages = [];
       if (entry.documentKey && entry.documentLibraryID != null) {
@@ -2403,7 +2488,7 @@
       }
       if (entry.messages?.length) {
         for (const msg of entry.messages) {
-          this.addMessage(msg.role, msg.text);
+          this.addMessage(msg.role, msg.text, msg);
         }
       }
       this.renderStatus(`已恢复 ${entry.agent} 会话`);
@@ -2666,6 +2751,7 @@
     }
 
     destroy() {
+      this.dismissAnswerMenu();
       this.stop();
       this._destroyed = true;
       this._contentObserver?.disconnect();

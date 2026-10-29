@@ -1,7 +1,8 @@
 {
   "name": "zotagent",
-  "version": "0.7.0",
+  "version": "0.7.2",
   "private": true,
+  "license": "Apache-2.0",
   "description": "Full-agent bridge for Zotero 9, OpenCode, Codex CLI, and Claude Code",
   "type": "module",
   "scripts": {

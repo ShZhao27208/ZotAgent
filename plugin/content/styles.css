@@ -1045,3 +1045,33 @@
 .zotagent-extra-title { white-space: normal; overflow-wrap: anywhere; }
 .zotagent-dialog .zotagent-messages { min-width: 0; overflow-wrap: anywhere; }
 .zotagent-document-actions button, .zotagent-fulltext-actions button { flex-shrink: 0; }
+
+/* Answer actions live outside the scrolling dialog so the menu is not clipped. */
+.zotagent-answer-menu {
+  position: fixed;
+  z-index: 2147483646;
+  pointer-events: auto;
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--fill-quinary, #c7c9cc);
+  border-radius: 6px;
+  background: var(--material-background, #fff);
+  color: var(--fill-primary, #202124);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 20%);
+  font: 13px/1.5 system-ui, sans-serif;
+}
+.zotagent-answer-menu button {
+  display: block;
+  width: 100%;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 3px;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.zotagent-answer-menu button:hover,
+.zotagent-answer-menu button:focus-visible { background: var(--fill-quinary, #edf2f7); }
+.zotagent-answer-menu button:disabled { opacity: .5; cursor: default; }
