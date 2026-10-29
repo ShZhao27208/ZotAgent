@@ -6,6 +6,8 @@ const root = path.resolve(import.meta.dirname, "..");
 const buildDir = path.join(root, "build");
 const distDir = path.join(root, "dist");
 const pluginSource = path.join(root, "plugin");
+const { runtimeBuildID } = await import("../runtime/src/runtime-identity.js");
+await fs.writeFile(path.join(pluginSource, "content/runtime-build.js"), `Zotero.ZotAgent._runtimeBuildID = ${JSON.stringify(runtimeBuildID())};\n`);
 const pluginBuild = path.join(buildDir, "plugin");
 
 if (process.argv.includes("--clean")) {
@@ -20,9 +22,27 @@ await fs.rm(buildDir, { recursive: true, force: true });
 await fs.rm(distDir, { recursive: true, force: true });
 await fs.mkdir(pluginBuild, { recursive: true });
 await fs.mkdir(distDir, { recursive: true });
-await fs.cp(pluginSource, pluginBuild, { recursive: true });
+const sourceFilter = source => !path.basename(source).startsWith(".")
+  && !/(?:\.log|\.tmp|\.bak|\.sw[op]|~|:Zone\.Identifier)$/i.test(source);
+await fs.cp(pluginSource, pluginBuild, { recursive: true, filter: sourceFilter });
+await fs.copyFile(path.join(root, "LICENSE"), path.join(pluginBuild, "LICENSE"));
+// Ship runtime sources and Windows native dependencies, never build-machine paths.
+const runtimeBuild = path.join(buildDir, "runtime");
+await fs.mkdir(runtimeBuild, { recursive: true });
+await fs.copyFile(path.join(root, "LICENSE"), path.join(runtimeBuild, "LICENSE"));
+await fs.cp(path.join(root, "runtime/src"), path.join(runtimeBuild, "src"), { recursive: true, filter: sourceFilter });
+const { version } = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
+await fs.writeFile(path.join(runtimeBuild, "package.json"), JSON.stringify({ type: "module", version, license: "Apache-2.0" }));
+const ptySource = path.join(root, "node_modules/node-pty");
+const ptyTarget = path.join(runtimeBuild, "node_modules/node-pty");
+for (const entry of ["package.json", "LICENSE", "lib", "prebuilds/win32-x64", "prebuilds/win32-arm64"]) {
+  await fs.mkdir(path.dirname(path.join(ptyTarget, entry)), { recursive: true });
+  await fs.cp(path.join(ptySource, entry), path.join(ptyTarget, entry), { recursive: true });
+}
+await fs.writeFile(path.join(pluginBuild, "runtime.zip"), createZip(await collectFiles(runtimeBuild)));
 const vendorDir = path.join(pluginBuild, "content/vendor");
 await fs.mkdir(vendorDir, { recursive: true });
+await fs.copyFile(path.join(root, "node_modules/@xterm/xterm/LICENSE"), path.join(vendorDir, "xterm-LICENSE"));
 await fs.copyFile(path.join(root, "node_modules/@xterm/xterm/lib/xterm.js"), path.join(vendorDir, "xterm.js"));
 await fs.copyFile(path.join(root, "node_modules/@xterm/xterm/css/xterm.css"), path.join(vendorDir, "xterm.css"));
 

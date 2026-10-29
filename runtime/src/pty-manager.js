@@ -21,6 +21,12 @@ export function createPtySession(agentCommand, args, cwd, env, options = {}) {
     session.subscribers.clear();
   });
   ptySessions.set(id, session);
+  // A creator that gave up before reading the response can never close this
+  // terminal, and an orphan would keep reserving the Agent's sessions.
+  if (options.claimTimeoutMs > 0) {
+    session.claimTimer = setTimeout(() => { if (!session.claimed) closePtySession(id); }, options.claimTimeoutMs);
+    session.claimTimer.unref?.();
+  }
   return session;
 }
 
@@ -42,7 +48,9 @@ export function resizePtySession(id, cols, rows) {
 export function subscribePtySession(id, listener) {
   const session = ptySessions.get(id);
   if (!session) return null;
-  if (session.output) listener(session.output, session);
+  session.claimed = true;
+  clearTimeout(session.claimTimer);
+  if (session.output) listener(session.output);
   if (session.alive) session.subscribers.add(listener); else listener(null, session);
   return () => session.subscribers.delete(listener);
 }
@@ -50,10 +58,16 @@ export function subscribePtySession(id, listener) {
 export function closePtySession(id) {
   const session = ptySessions.get(id);
   if (!session) return false;
+  clearTimeout(session.claimTimer);
   if (session.alive) { try { session.terminal.kill(); } catch {} }
-  session.subscribers.clear(); ptySessions.delete(id); return true;
+  for (const subscriber of session.subscribers) {
+    try { subscriber(null, { exitCode: session.exitCode, signal: "cleanup" }); } catch {}
+  }
+  session.subscribers.clear();
+  ptySessions.delete(id);
+  return true;
 }
 
 export function listPtySessions() {
-  return [...ptySessions.values()].map((session) => ({ id: session.id, alive: session.alive, exitCode: session.exitCode }));
+  return [...ptySessions.values()].map((session) => ({ id: session.id, alive: session.alive, exitCode: session.exitCode, agent: session.agent, nativeSessionID: session.nativeSessionID, resumePicker: session.resumePicker === true }));
 }

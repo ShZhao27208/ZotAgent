@@ -1,11 +1,9 @@
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { randomUUID } from "node:crypto";
+import { DATA_DIR } from "./config.js";
 
-const STORE_DIR = join(
-  process.env.HOME || "/tmp",
-  ".local/share/zotero-full-agent",
-);
-const STORE_PATH = join(STORE_DIR, "sessions.json");
+const STORE_PATH = join(DATA_DIR, "sessions.json");
 
 let cache = null;
 
@@ -21,7 +19,9 @@ function load() {
 
 function save() {
   mkdirSync(dirname(STORE_PATH), { recursive: true });
-  writeFileSync(STORE_PATH, JSON.stringify(cache, null, 2));
+  const tmp = STORE_PATH + "." + randomUUID().slice(0, 8) + ".tmp";
+  writeFileSync(tmp, JSON.stringify(cache, null, 2));
+  renameSync(tmp, STORE_PATH);
 }
 
 export function listSessions(agent) {

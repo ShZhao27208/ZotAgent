@@ -1,10 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, accessSync, constants } from "node:fs";
+import { join, delimiter, dirname } from "node:path";
+import { shellDescriptor } from "./shell.js";
 
 export function resolveClaudePath() {
-  // Scan NVM global modules for the Claude Code package
+  if (process.platform === "win32") return resolveFromPath("claude");
+  const native = resolveFromPath("claude");
+  if (native !== "claude") return native;
+  // Scan NVM global modules for legacy Claude Code installations
   const nvmDir = process.env.NVM_DIR || join(process.env.HOME || "/tmp", ".nvm");
   try {
     const versionsDir = join(nvmDir, "versions/node");
@@ -33,25 +37,35 @@ export function resolveClaudePath() {
   return "claude";
 }
 
-function resolveFromPath(command) {
+export function resolveFromPath(command, env = process.env, nodePath = process.execPath) {
+  const home = env.USERPROFILE || env.HOME || "/tmp";
+  const directories = [
+    ...(env.PATH || env.Path || "").split(delimiter).filter(Boolean),
+    ...(env.APPDATA ? [join(env.APPDATA, "npm")] : []),
+    dirname(nodePath), join(home, ".local/bin"), join(home, ".npm-global/bin"),
+    join(home, ".opencode/bin"), "/usr/local/bin", "/usr/bin",
+  ];
+  const versions = join(env.NVM_DIR || join(home, ".nvm"), "versions/node");
   try {
-    return execFileSync("which", [command], { encoding: "utf8" }).trim();
-  } catch {
-    return command;
+    for (const version of readdirSync(versions).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))) {
+      directories.push(join(versions, version, "bin"));
+    }
+  } catch {}
+  for (const directory of directories) {
+    for (const suffix of process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""]) {
+      const candidate = join(directory, command + suffix);
+      try { accessSync(candidate, constants.X_OK); return candidate; } catch {}
+    }
   }
+  return command;
 }
 
-const DEFAULT_PATHS = {
-  opencode: resolveFromPath("opencode"),
-  codex: resolveFromPath("codex"),
-  "claude-code": resolveClaudePath(),
-};
+export const DATA_DIR = process.env.ZOTAGENT_DATA_DIR || join(
+  process.env.USERPROFILE || process.env.HOME || "/tmp",
+  ".local/share/zotero-full-agent",
+);
 
-const DEFAULT_PLATFORMS = {
-  opencode: "wsl",
-  codex: "wsl",
-  "claude-code": "wsl",
-};
+const nativeHost = process.platform === "win32" ? "windows" : "wsl";
 
 function readArg(name) {
   const index = process.argv.indexOf(name);
@@ -70,18 +84,25 @@ export function loadConfig() {
     port: Number(process.env.ZOTAGENT_PORT || readArg("--port") || 24119),
     token,
     generatedToken,
-    defaultCwd: process.env.ZOTAGENT_CWD || process.env.HOME || "/tmp",
-    defaultWindowsCwd: process.env.ZOTAGENT_WIN_CWD || "/mnt/c/Users",
+    shell: shellDescriptor(),
+    wslDistro: process.env.ZOTAGENT_WSL_DISTRO || "Ubuntu",
+    defaultCwd: process.env.ZOTAGENT_CWD || (process.platform === "win32" ? process.env.USERPROFILE || process.cwd() : process.env.HOME || "/tmp"),
+    defaultWindowsCwd: process.env.ZOTAGENT_WIN_CWD || process.env.USERPROFILE || (process.platform === "win32" ? process.cwd() : "/mnt/c/Users"),
+    // Paths are kept per system so switching an Agent's system never discards
+    // the other installation. Empty means discover at launch time.
     executables: {
-      opencode: process.env.ZOTAGENT_OPENCODE || DEFAULT_PATHS.opencode,
-      codex: process.env.ZOTAGENT_CODEX || DEFAULT_PATHS.codex,
-      "claude-code":
-        process.env.ZOTAGENT_CLAUDE || DEFAULT_PATHS["claude-code"],
+      windows: {},
+      wsl: {},
+      [nativeHost]: {
+        opencode: process.env.ZOTAGENT_OPENCODE || "",
+        codex: process.env.ZOTAGENT_CODEX || "",
+        "claude-code": process.env.ZOTAGENT_CLAUDE || "",
+      },
     },
     platforms: {
-      opencode: process.env.ZOTAGENT_OPENCODE_PLATFORM || DEFAULT_PLATFORMS.opencode,
-      codex: process.env.ZOTAGENT_CODEX_PLATFORM || DEFAULT_PLATFORMS.codex,
-      "claude-code": process.env.ZOTAGENT_CLAUDE_PLATFORM || DEFAULT_PLATFORMS["claude-code"],
+      opencode: process.env.ZOTAGENT_OPENCODE_PLATFORM || "auto",
+      codex: process.env.ZOTAGENT_CODEX_PLATFORM || "auto",
+      "claude-code": process.env.ZOTAGENT_CLAUDE_PLATFORM || "auto",
     },
   };
 }

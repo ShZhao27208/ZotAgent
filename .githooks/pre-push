@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+set -eu
+
+# Validate the distributable; update history locally without requiring a
+# recursive history-only commit or a future push timestamp.
+npm run verify
+npm run version-history >/dev/null

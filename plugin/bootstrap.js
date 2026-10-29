@@ -11,7 +11,7 @@ if (!Services) {
 
 function install() {}
 
-async function startup({ rootURI }) {
+async function startup({ rootURI, version }) {
   if (Zotero.ZotAgent?.hooks?.onShutdown) {
     try { await Zotero.ZotAgent.hooks.onShutdown(); } catch (_) {}
   }
@@ -23,17 +23,29 @@ async function startup({ rootURI }) {
     ["content", "zotagent", rootURI + "content/"],
   ]);
 
-  const context = { rootURI, Services };
+  let timers;
+  try { timers = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs"); }
+  catch (_) { timers = ChromeUtils.import("resource://gre/modules/Timer.jsm"); }
+  const context = { rootURI, Services, setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout };
   context._globalThis = context;
   Services.scriptloader.loadSubScript(
     rootURI + "content/zot-agent.js",
     context,
   );
+  for (const script of ["archive-format.js", "conversation-archive.js", "archive-export.js"]) {
+    Services.scriptloader.loadSubScript(rootURI + "content/" + script, context);
+  }
   Services.scriptloader.loadSubScript(
     rootURI + "content/preferences.js",
     context,
   );
-  await Zotero.ZotAgent.hooks.onStartup();
+  Zotero.ZotAgent._rootURI = rootURI;
+  Zotero.ZotAgent._version = version;
+  Services.scriptloader.loadSubScript(rootURI + "content/runtime-build.js", context);
+  Services.scriptloader.loadSubScript(rootURI + "content/runtime-installer.js", context);
+  // Zotero may await bootstrap before finishing the item tree. Do not block
+  // plugin initialization on uiReadyPromise.
+  Zotero.ZotAgent.hooks.onStartup().catch(error => Zotero.logError(error));
 }
 
 async function onMainWindowLoad({ window }) {

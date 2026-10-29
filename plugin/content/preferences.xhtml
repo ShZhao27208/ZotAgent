@@ -166,32 +166,42 @@
       border-color: var(--za-cyan) !important;
     }
     #zotagent-preferences checkbox { color: #385566; }
+    .zotagent-model-picker { display: flex; gap: 8px; min-width: 0; align-items: center; }
+    #zotagent-opencode-model { flex: 1; min-width: 0; }
+    #zotagent-refresh-models { flex: none; margin: 0; }
   </html:style>
 
   <groupbox>
     <label><html:h2>Runtime</html:h2></label>
-    <html:p class="zotagent-help">插件会在首次启动时生成安全 Token，并自动通过 WSL 启动 Runtime。自动启动失败时仍可手动启动。</html:p>
+    <html:p class="zotagent-help">插件会在首次启动时生成安全 Token。Windows 默认自动部署内置 Runtime、填写本机路径并使用已有 Node.js 启动；Agent 可分别选择 Windows 或 WSL；Windows 后端通过 wsl.exe 调用所选发行版内的 Agent。后端切换为 WSL 时，Node 可留空，由 WSL 登录环境（含 NVM）自动查找；WSL 后端同样能启动 Windows Agent。</html:p>
     <checkbox
       id="zotagent-auto-start-runtime"
       label="启动 Zotero 时自动启动并连接 Runtime"
       data-pref="autoStartRuntime"
     />
     <html:div class="zotagent-pref-grid">
+      <html:label for="zotagent-runtime-host">后端启动位置</html:label>
+      <html:select id="zotagent-runtime-host" data-pref="runtimeHost">
+        <html:option value="auto">自动（Windows 使用本机后端）</html:option>
+        <html:option value="wsl">WSL（手动高级配置）</html:option>
+      </html:select>
       <html:label for="zotagent-runtime-endpoint">Endpoint</html:label>
       <html:input id="zotagent-runtime-endpoint" data-pref="runtimeEndpoint" />
       <html:label for="zotagent-runtime-token">Token</html:label>
       <html:input id="zotagent-runtime-token" data-pref="runtimeToken" type="password" />
       <html:label for="zotagent-runtime-script">Runtime 脚本</html:label>
       <html:input id="zotagent-runtime-script" data-pref="runtimeScriptPath" />
-      <html:label for="zotagent-runtime-node">WSL Node.js</html:label>
+      <html:label for="zotagent-runtime-node">Runtime Node.js（高级设置）</html:label>
       <html:input id="zotagent-runtime-node" data-pref="runtimeNodePath" />
-      <html:label for="zotagent-wsl-distro">WSL 发行版</html:label>
+      <html:label for="zotagent-wsl-distro">WSL 发行版（高级设置）</html:label>
       <html:input id="zotagent-wsl-distro" data-pref="wslDistro" />
       <html:label for="zotagent-working-directory">默认工作目录</html:label>
       <html:input id="zotagent-working-directory" data-pref="defaultWorkingDirectory" />
     </html:div>
     <hbox class="zotagent-actions">
-      <button id="zotagent-start-runtime" label="立即启动" />
+      <button id="zotagent-start-runtime" label="启动 Runtime" />
+      <button id="zotagent-stop-runtime" label="停止 Runtime" />
+      <button id="zotagent-restart-runtime" label="重启 Runtime" />
       <button id="zotagent-test-runtime" label="检测连接" />
     </hbox>
     <html:pre id="zotagent-runtime-result"></html:pre>
@@ -200,26 +210,35 @@
   <groupbox>
     <label><html:h2>Agent 命令</html:h2></label>
     <html:div class="zotagent-pref-grid">
-      <html:label for="zotagent-opencode-path">OpenCode</html:label>
-      <html:input id="zotagent-opencode-path" data-pref="opencodePath" />
-      <html:label for="zotagent-opencode-platform">OpenCode 平台</html:label>
+      <html:label for="zotagent-opencode-path-windows">OpenCode · Windows 路径</html:label>
+      <html:input id="zotagent-opencode-path-windows" data-pref="opencodePathWindows" placeholder="留空自动检测" />
+      <html:label for="zotagent-opencode-path-wsl">OpenCode · WSL 路径</html:label>
+      <html:input id="zotagent-opencode-path-wsl" data-pref="opencodePathWSL" placeholder="留空自动检测" />
+      <html:label for="zotagent-opencode-platform">OpenCode 运行环境</html:label>
       <html:select id="zotagent-opencode-platform" data-pref="opencodePlatform">
+        <html:option value="auto">自动（优先后端所在系统）</html:option>
         <html:option value="wsl">WSL (Linux)</html:option>
         <html:option value="windows">Windows</html:option>
       </html:select>
       <html:label for="zotagent-opencode-model">OpenCode 模型</html:label>
-      <html:input id="zotagent-opencode-model" data-pref="opencodeModel" placeholder="留空使用 OpenCode 默认模型" />
-      <html:label for="zotagent-codex-path">Codex CLI</html:label>
-      <html:input id="zotagent-codex-path" data-pref="codexPath" />
-      <html:label for="zotagent-codex-platform">Codex 平台</html:label>
+      <html:div class="zotagent-model-picker"><html:select id="zotagent-opencode-model" data-pref="opencodeModel"><html:option value="">跟随 OpenCode 最近使用的模型</html:option></html:select><button id="zotagent-refresh-models" label="刷新" /></html:div>
+      <html:label for="zotagent-codex-path-windows">Codex · Windows 路径</html:label>
+      <html:input id="zotagent-codex-path-windows" data-pref="codexPathWindows" placeholder="留空自动检测" />
+      <html:label for="zotagent-codex-path-wsl">Codex · WSL 路径</html:label>
+      <html:input id="zotagent-codex-path-wsl" data-pref="codexPathWSL" placeholder="留空自动检测" />
+      <html:label for="zotagent-codex-platform">Codex 运行环境</html:label>
       <html:select id="zotagent-codex-platform" data-pref="codexPlatform">
+        <html:option value="auto">自动（优先后端所在系统）</html:option>
         <html:option value="wsl">WSL (Linux)</html:option>
         <html:option value="windows">Windows</html:option>
       </html:select>
-      <html:label for="zotagent-claude-path">Claude Code</html:label>
-      <html:input id="zotagent-claude-path" data-pref="claudePath" />
-      <html:label for="zotagent-claude-platform">Claude Code 平台</html:label>
+      <html:label for="zotagent-claude-path-windows">Claude Code · Windows 路径</html:label>
+      <html:input id="zotagent-claude-path-windows" data-pref="claudePathWindows" placeholder="留空自动检测" />
+      <html:label for="zotagent-claude-path-wsl">Claude Code · WSL 路径</html:label>
+      <html:input id="zotagent-claude-path-wsl" data-pref="claudePathWSL" placeholder="留空自动检测" />
+      <html:label for="zotagent-claude-platform">Claude Code 运行环境</html:label>
       <html:select id="zotagent-claude-platform" data-pref="claudePlatform">
+        <html:option value="auto">自动（优先后端所在系统）</html:option>
         <html:option value="wsl">WSL (Linux)</html:option>
         <html:option value="windows">Windows</html:option>
       </html:select>
@@ -230,11 +249,11 @@
         <html:option value="claude-code">Claude Code</html:option>
       </html:select>
     </html:div>
-    <html:p style="margin:4px 0 0;font-size:11px;color:#666;">路径说明: WSL 平台填 Linux 路径 (如 /home/.../bin/claude)；Windows 平台填 WSL 可见的路径 (如 /mnt/c/Users/.../claude.exe)</html:p>
+    <html:p style="margin:4px 0 0;font-size:11px;color:#666;">Windows 与 WSL 路径分别保存，切换运行环境不会清空另一边；留空时连接后自动检测并回填。“自动”优先使用后端所在系统，未安装时改用另一系统；各 Agent 可分别选择系统并同时使用。WSL 使用上方指定的发行版。OpenCode 未指定模型时读取同一环境的最近使用记录；无记录或模型已下架时提示重新选择，不回退到旧默认模型。</html:p>
     <hbox style="margin-top:8px;gap:6px;">
-      <button id="zotagent-test-opencode" label="测试 OpenCode" />
-      <button id="zotagent-test-codex" label="测试 Codex" />
-      <button id="zotagent-test-claude" label="测试 Claude Code" />
+      <button id="zotagent-test-opencode" label="检测 OpenCode" />
+      <button id="zotagent-test-codex" label="检测 Codex" />
+      <button id="zotagent-test-claude" label="检测 Claude Code" />
     </hbox>
     <html:pre id="zotagent-agent-result" style="min-height:60px;margin-top:8px;white-space:pre-wrap;font-size:11px;background:#f5f5f5;padding:6px;border-radius:4px;"></html:pre>
   </groupbox>
@@ -256,6 +275,16 @@
       label="生成完成后自动插入活动笔记光标"
       data-pref="autoInsertAtCursor"
     />
+  </groupbox>
+
+  <groupbox>
+    <label><html:h2>对话历史归档</html:h2></label>
+    <html:p class="zotagent-help">同一主文献的三个 Agent 和多个窗口共用记忆笔记。仅在完成、失败或中断时归档；不调用模型，不保存思考过程或 PDF 全文。手动“保存子笔记”用于单独收藏回答。</html:p>
+    <html:div id="zotagent-archive-settings" class="zotagent-pref-grid"></html:div>
+    <html:p class="zotagent-help">自由输入模板并从下拉菜单插入字段，例如 {title}_ {tags}_ {author}_ {date}。{date} 为创建日期，{time} 为创建时间，{year} 为文献发表年份；缺失字段留空，分隔符按输入保留。{sequence} 的补零由序号选项控制；重名仍自动追加编号。</html:p>
+    <html:p id="zotagent-archive-name-preview" class="zotagent-help"></html:p>
+    <html:p id="zotagent-archive-settings-status" class="zotagent-help"></html:p>
+    <html:p class="zotagent-help">命名设置仅影响新笔记；更改排序会重排当前归档笔记，保留已有正文。全文不主动截断，仍受请求体大小、CLI 和模型上下文限制。</html:p>
   </groupbox>
 
   <groupbox>

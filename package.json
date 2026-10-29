@@ -1,7 +1,8 @@
 {
   "name": "zotagent",
-  "version": "0.3.2",
+  "version": "0.7.2",
   "private": true,
+  "license": "Apache-2.0",
   "description": "Full-agent bridge for Zotero 9, OpenCode, Codex CLI, and Claude Code",
   "type": "module",
   "scripts": {
@@ -9,13 +10,18 @@
     "clean": "node scripts/build.mjs --clean",
     "runtime": "node runtime/src/index.js",
     "test": "node --test",
-    "verify": "node scripts/verify.mjs"
+    "verify": "node scripts/verify.mjs",
+    "version-history": "node scripts/update-version-history.mjs",
+    "coverage": "node --test --experimental-test-coverage"
   },
   "engines": {
     "node": ">=24"
   },
   "dependencies": {
-    "@xterm/xterm": "^5.5.0",
-    "node-pty": "^1.1.0"
+    "@xterm/xterm": "5.5.0",
+    "node-pty": "1.1.0"
+  },
+  "devDependencies": {
+    "linkedom": "0.18.13"
   }
 }

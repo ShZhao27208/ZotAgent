@@ -29,15 +29,15 @@
 
 .zotagent-dialog {
   position: fixed;
-  display: grid;
-  grid-template-rows: auto auto auto auto minmax(120px, 1fr) auto auto auto;
+  display: flex;
+  flex-direction: column;
   width: min(460px, calc(100vw - 24px));
   height: min(680px, calc(100vh - 36px));
   min-width: 320px;
-  min-height: 360px;
+  min-height: 420px;
   max-width: calc(100vw - 12px);
-  max-height: calc(100vh - 12px);
-  overflow: hidden;
+  max-height: calc(100vh - var(--za-top, 0px) - 12px);
+  overflow: auto;
   resize: both;
   pointer-events: auto;
   color: var(--fill-primary, #202124);
@@ -193,8 +193,8 @@
 }
 
 .zotagent-selection-box {
-  display: grid;
-  grid-template-columns: 1fr auto;
+  display: flex;
+  flex-direction: column;
   gap: 5px 8px;
   padding: 9px 12px;
   background: color-mix(in srgb, #e9f3fa 62%, transparent);
@@ -216,6 +216,8 @@
 }
 
 .zotagent-messages {
+  flex: 1 1 100px;
+  min-height: 60px;
   overflow: auto;
   padding: 13px 12px;
   background: var(--material-background, #fff);
@@ -261,7 +263,7 @@
 
 .zotagent-composer {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 6px;
   padding: 9px 12px;
   background: var(--material-background, #fff);
@@ -271,6 +273,8 @@
   box-sizing: border-box;
   width: 100%;
   height: 66px;
+  max-height: 120px;
+  grid-column: 1 / -1;
   resize: vertical;
 }
 
@@ -491,6 +495,7 @@
 
 .zotagent-pty-output {
   flex: 1;
+  min-height: 0;
   margin: 0;
   padding: 8px 10px;
   overflow-y: auto;
@@ -978,7 +983,7 @@
 
 .zotagent-pty-container { border-color: var(--za-line-strong); background: #f7fbfd; }
 .zotagent-pty-output { color: #24515a; background: #f7fbfd; }
-.zotagent-pty-output .xterm { height: 100%; padding: 8px 10px; }
+.zotagent-pty-output .xterm { height: 100%; padding: 0; }
 .zotagent-pty-output .xterm-viewport { background: #f7fbfd !important; }
 .zotagent-pty-input { color: #173f47; background: #eaf4f5; border-color: #bed5d9; }
 .zotagent-pty-input::placeholder { color: #7e989e; }
@@ -987,3 +992,86 @@
   background: #ffffff;
   border-color: var(--za-line-strong);
 }
+
+.zotagent-archive-bar { display: flex; align-items: center; gap: 4px; padding: 4px 10px; border-bottom: 1px solid var(--za-line); }
+.zotagent-archive-label { flex: 0 1 auto; min-width: 0; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zotagent-archive-bar button { flex: 0 0 auto; padding: 0 6px; min-height: 24px; }
+.zotagent-archive-bar [hidden] { display: none; }
+.zotagent-dialog > :not(.zotagent-messages):not(.zotagent-pty-container):not(.zotagent-context-details) { flex: 0 0 auto; }
+.zotagent-context-details { flex: 0 1 auto; min-height: 0; max-height: 42%; overflow: auto; }
+.zotagent-selection-header { display: flex; align-items: center; gap: 6px; }
+.zotagent-selection-header .zotagent-selection-label { flex: 1; }
+.zotagent-selection-box > * { flex-shrink: 0; }
+.zotagent-selection-input { min-height: 42px; max-height: 100px; }
+.zotagent-status { max-height: 42px; overflow: auto; }
+.zotagent-actions { flex-wrap: wrap; }
+.zotagent-fulltext-status:empty, .zotagent-extra-items:empty { display: none; }
+.zotagent-fulltext-status { padding: 0 10px; white-space: pre-wrap; max-height: 80px; overflow-y: auto; font-size: 11px; }
+
+.zotagent-archive-select { flex: 1; min-width: 0; width: 0; font-size: 11px; min-height: 24px; }
+.zotagent-terminal-info { flex: 0 0 auto; padding: 4px 10px; border-bottom: 1px solid var(--za-line); font-size: 11px; }
+.zotagent-terminal-info summary { cursor: pointer; color: var(--za-muted); }
+.zotagent-terminal-info div { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; max-height: 110px; overflow: auto; }
+
+/* Keep document actions distinct from full-text inclusion and analysis mode. */
+.zotagent-ref-bar { display: flex; flex-direction: column; align-items: stretch; gap: 7px; }
+.zotagent-document-actions, .zotagent-fulltext-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.zotagent-document-actions strong { margin-right: auto; color: var(--za-text); }
+.zotagent-primary-choice { display: inline-flex; align-items: center; gap: 4px; margin-right: auto; }
+.zotagent-primary-choice label { white-space: nowrap; }
+.zotagent-analysis-mode { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--za-muted); }
+/* Sibling overlay escapes the context region's 42% scroll-height restriction.
+   Only the document list scrolls, leaving the destination action visible. */
+.zotagent-dialog > .zotagent-pdf-export {
+  position: absolute; inset: 42px 0 0; z-index: 20;
+  display: flex; flex-direction: column; min-height: 0; padding: 16px;
+  box-sizing: border-box; background: var(--za-panel, #fff); color: var(--za-text, #173042);
+  border-top: 1px solid var(--za-line, #d5e1e8); overflow: hidden;
+}
+.zotagent-export-heading { flex: none; font-size: 15px; }
+.zotagent-export-hint { flex: none; margin: 6px 0 12px; color: var(--za-muted, #687f8f); font-size: 12px; }
+.zotagent-export-list { flex: 1; min-height: 0; overflow: auto; border-block: 1px solid var(--za-line, #d5e1e8); padding: 6px 0; }
+.zotagent-export-list label { display: flex; align-items: flex-start; gap: 8px; padding: 8px 4px; overflow-wrap: anywhere; }
+.zotagent-export-list input { flex: none; }
+.zotagent-export-footer { flex: none; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-top: 12px; }
+
+.zotagent-dialog.is-minimized > .zotagent-pdf-export { display: none; }
+
+/* Content-driven sizing keeps controls readable; overflow is confined to lists. */
+.zotagent-dialog { box-sizing: border-box; min-width: min(320px, calc(100vw - 24px)); min-height: min(420px, calc(100vh - 24px)); }
+.zotagent-context-details { max-height: var(--za-context-height, 55%); }
+.zotagent-extra-items { max-height: none; overflow: visible; }
+.zotagent-extra-item { flex-shrink: 0; align-items: flex-start; }
+.zotagent-extra-title { white-space: normal; overflow-wrap: anywhere; }
+.zotagent-dialog .zotagent-messages { min-width: 0; overflow-wrap: anywhere; }
+.zotagent-document-actions button, .zotagent-fulltext-actions button { flex-shrink: 0; }
+
+/* Answer actions live outside the scrolling dialog so the menu is not clipped. */
+.zotagent-answer-menu {
+  position: fixed;
+  z-index: 2147483646;
+  pointer-events: auto;
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--fill-quinary, #c7c9cc);
+  border-radius: 6px;
+  background: var(--material-background, #fff);
+  color: var(--fill-primary, #202124);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 20%);
+  font: 13px/1.5 system-ui, sans-serif;
+}
+.zotagent-answer-menu button {
+  display: block;
+  width: 100%;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 3px;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.zotagent-answer-menu button:hover,
+.zotagent-answer-menu button:focus-visible { background: var(--fill-quinary, #edf2f7); }
+.zotagent-answer-menu button:disabled { opacity: .5; cursor: default; }

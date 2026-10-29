@@ -14,13 +14,16 @@ export class AgentAdapter {
     return args;
   }
 
+  get supportsImages() { return false; }
+  get supportsApproval() { return false; }
+
   interactiveArgs(sessionID, cwd) {
     return { args: [], cwd };
   }
 
   resolveCwd(cwd, defaultWindowsCwd) {
     if (this.platform === "windows") {
-      if (cwd && cwd.startsWith("/mnt/")) return cwd;
+      if (cwd && (cwd.startsWith("/mnt/") || /^[a-z]:[\\/]/i.test(cwd) || cwd.startsWith("\\\\"))) return cwd;
       return defaultWindowsCwd || "/mnt/c/Users";
     }
     return cwd;

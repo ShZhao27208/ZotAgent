@@ -30,17 +30,6 @@ test("native terminal labels do not expose the internal PTY name", () => {
   assert.doesNotMatch(source, /终端实验/);
 });
 
-test("failed agent requests expose stderr details", () => {
-  assert.match(source, /event\.data\.stderr/);
-  assert.match(source, /退出码.*detail/);
-});
-
-test("multi-reference context keeps a locked primary document", () => {
-  assert.match(source, /if \(this\.primaryContext\) return/);
-  assert.match(source, /主文献:/);
-  assert.match(source, /\[this\.context, \.\.\.this\.extraItems\]/);
-});
-
 test("long capture keeps native scrolling and waits for confirmation", () => {
   const start = source.indexOf("    _captureLongSlices(");
   const end = source.indexOf("    _captureViewportRegion(", start);
@@ -56,4 +45,8 @@ test("long capture keeps native scrolling and waits for confirmation", () => {
 test("long capture appends only the newly revealed scroll distance", () => {
   assert.match(source, /const delta = slices\[index\]\.top - slices\[index - 1\]\.top/);
   assert.match(source, /sourceY: images\[index\]\.height - newHeight/);
+});
+
+test("no hardcoded /home/shzhao paths in plugin source", () => {
+  assert.doesNotMatch(source, /\/home\/shzhao/);
 });

@@ -21,15 +21,17 @@ function extractFunction(name) {
 const escapeHTMLSrc = extractFunction("escapeHTML");
 const markdownSrc = extractFunction("markdownToNoteHTML");
 const wslPathSrc = extractFunction("windowsToWSLPath");
+const rootURISrc = extractFunction("rootURIToWSLPath");
 
 const mod = new Function(`
   ${escapeHTMLSrc}
   ${markdownSrc}
   ${wslPathSrc}
-  return { escapeHTML, markdownToNoteHTML, windowsToWSLPath };
+  ${rootURISrc}
+  return { escapeHTML, markdownToNoteHTML, windowsToWSLPath, rootURIToWSLPath };
 `)();
 
-const { escapeHTML, markdownToNoteHTML, windowsToWSLPath } = mod;
+const { escapeHTML, markdownToNoteHTML, windowsToWSLPath, rootURIToWSLPath } = mod;
 
 // ─── escapeHTML ──────────────────────────────────────
 
@@ -58,6 +60,14 @@ test("windowsToWSLPath converts a drive letter path", () => {
 
 test("windowsToWSLPath converts uppercase drive letter", () => {
   assert.equal(windowsToWSLPath("D:\\Data\\file.txt"), "/mnt/d/Data/file.txt");
+});
+
+test("windowsToWSLPath converts wsl.localhost UNC path", () => {
+  assert.equal(windowsToWSLPath("\\\\wsl.localhost\\Ubuntu\\home\\user\\project"), "/home/user/project");
+});
+
+test("windowsToWSLPath converts wsl$ UNC path", () => {
+  assert.equal(windowsToWSLPath("\\\\wsl$\\Ubuntu\\home\\user\\project"), "/home/user/project");
 });
 
 test("windowsToWSLPath passes through non-Windows paths", () => {
@@ -142,4 +152,28 @@ test("markdownToNoteHTML converts strikethrough", () => {
 
 test("markdownToNoteHTML handles empty input", () => {
   assert.equal(markdownToNoteHTML(""), "");
+});
+
+// ─── rootURIToWSLPath ───────────────────────────────
+
+test("rootURIToWSLPath converts Windows drive URI", () => {
+  assert.equal(rootURIToWSLPath("file:///C:/Users/test/ZotAgent/plugin/"), "/mnt/c/Users/test/ZotAgent/plugin");
+});
+
+test("rootURIToWSLPath converts wsl.localhost URI", () => {
+  assert.equal(rootURIToWSLPath("file:///wsl.localhost/Ubuntu/home/user/ZotAgent/plugin/"), "/home/user/ZotAgent/plugin");
+});
+
+test("rootURIToWSLPath converts wsl$ URI", () => {
+  assert.equal(rootURIToWSLPath("file:///wsl$/Ubuntu/home/user/ZotAgent/plugin/"), "/home/user/ZotAgent/plugin");
+});
+
+test("rootURIToWSLPath passes through Unix paths", () => {
+  assert.equal(rootURIToWSLPath("file:///home/user/ZotAgent/plugin/"), "/home/user/ZotAgent/plugin");
+});
+
+test("rootURIToWSLPath returns empty string for falsy input", () => {
+  assert.equal(rootURIToWSLPath(""), "");
+  assert.equal(rootURIToWSLPath(null), "");
+  assert.equal(rootURIToWSLPath(undefined), "");
 });

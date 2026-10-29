@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 import http from "node:http";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
-import { writeFileSync, mkdirSync } from "node:fs";
-import { loadConfig, resolveClaudePath } from "./config.js";
-import { existsSync } from "node:fs";
+import { writeFileSync, mkdirSync, unlinkSync, statSync, readFileSync } from "node:fs";
+import { DATA_DIR, loadConfig } from "./config.js";
 import {
   envelope,
   isAuthorized,
@@ -18,8 +17,10 @@ import {
 import { createAdapters } from "./adapters/index.js";
 import {
   classifyRawEvent,
+  extractError,
   extractSessionID,
-  extractText,
+  createTextExtractor,
+  extractModel,
   parseAgentLine,
 } from "./normalize.js";
 import { listSessions, upsertSession, deleteSession } from "./sessions.js";
@@ -32,23 +33,49 @@ import {
   subscribePtySession,
   resizePtySession,
 } from "./pty-manager.js";
+import { ptyShellArgs } from "./shell.js";
+import { createAgentLauncher, agentPlatform, nativePlatform, pathMatchesPlatform, toWSLPath, toWindowsPath } from "./agent-launch.js";
 
+import { createModelCatalog, selectModel } from "./opencode-models.js";
+
+import { runtimeBuildID } from "./runtime-identity.js";
+const buildID = runtimeBuildID();
+// The packaged Runtime carries its own package.json; a source checkout uses the project's.
+const runtimeVersion = [join(import.meta.dirname, "../package.json"), join(import.meta.dirname, "../../package.json")]
+  .map(file => { try { return JSON.parse(readFileSync(file, "utf8")).version; } catch { return null; } })
+  .find(Boolean) || "unknown";
 const config = loadConfig();
-let adapters = createAdapters(config.executables, config.platforms);
+const BARE_COMMANDS = { opencode: ["opencode"], codex: ["codex"], "claude-code": ["claude", "claude-code"] };
+
+class RequestError extends Error {
+  constructor(message, status = 400) { super(message); this.status = status; }
+}
+if (process.platform === "win32") {
+  const { dirname, delimiter } = await import("node:path");
+  process.env.Path = [dirname(process.execPath), process.env.APPDATA ? join(process.env.APPDATA, "npm") : "", process.env.Path || process.env.PATH || ""].filter(Boolean).join(delimiter);
+}
+// Capability lookup only; launches build an adapter from the resolved location.
+const platformAdapters = () => createAdapters({}, Object.fromEntries(Object.keys(config.platforms).map(name => [name, agentPlatform(config, name)])));
+let adapters = platformAdapters();
 const running = new Map();
+const preparing = new Map();
+const launcher = createAgentLauncher(config);
+const modelCatalog = createModelCatalog(launcher, { storePath: join(DATA_DIR, "opencode-models.json") });
+const instanceID = randomUUID();
+let stopping = false;
 
 function validateRunRequest(body) {
   const agent = String(body.agent || "");
-  if (!adapters[agent]) throw new Error(`Unsupported agent: ${agent}`);
+  if (!adapters[agent]) throw new RequestError(`Unsupported agent: ${agent}`);
   const prompt = String(body.prompt || "");
-  if (!prompt.trim()) throw new Error("prompt is required");
+  if (!prompt.trim()) throw new RequestError("prompt is required");
   const adapter = adapters[agent];
   const rawCwd = String(body.cwd || "");
   const cwd = adapter.resolveCwd(
     rawCwd || (adapter.platform === "windows" ? config.defaultWindowsCwd : config.defaultCwd),
     config.defaultWindowsCwd,
   );
-  if (!isAbsolute(cwd)) throw new Error("cwd must be an absolute path");
+  if (!isAbsolute(cwd) && !/^[a-z]:[\\/]/i.test(cwd)) throw new RequestError("cwd must be an absolute path");
   return {
     requestID: String(body.requestID || randomUUID()),
     windowID: String(body.windowID || "unknown-window"),
@@ -60,15 +87,15 @@ function validateRunRequest(body) {
     nativeSessionID: body.nativeSessionID
       ? String(body.nativeSessionID)
       : null,
+    // System that owns nativeSessionID; an automatic Agent resumes there.
+    sessionPlatform: ["windows", "wsl"].includes(body.platform) ? body.platform : null,
     files: Array.isArray(body.files) ? body.files.map(String) : [],
     image: body.image ? String(body.image) : null,
   };
 }
 
-const TEMP_DIR = join(
-  process.env.HOME || "/tmp",
-  ".local/share/zotero-full-agent/tmp",
-);
+const PTY_CLAIM_TIMEOUT_MS = Number(process.env.ZOTAGENT_PTY_CLAIM_MS) || 30000;
+const TEMP_DIR = join(DATA_DIR, "tmp");
 
 function saveImageToTemp(dataURL) {
   mkdirSync(TEMP_DIR, { recursive: true });
@@ -76,7 +103,7 @@ function saveImageToTemp(dataURL) {
   if (!match) return null;
   const ext = match[1] === "jpeg" ? "jpg" : match[1];
   const buffer = Buffer.from(match[2], "base64");
-  const filename = `capture-${Date.now()}.${ext}`;
+  const filename = `capture-${randomUUID()}.${ext}`;
   const filePath = join(TEMP_DIR, filename);
   writeFileSync(filePath, buffer);
   return filePath;
@@ -86,28 +113,109 @@ function terminateProcess(child) {
   if (!child || child.exitCode !== null) return;
   try {
     if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGTERM");
-    else child.kill("SIGTERM");
+    else if (child.pid) execFile("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true }, () => {});
   } catch {
     child.kill("SIGTERM");
   }
 }
 
-function runAgent(request, response) {
-  if (request.image) {
-    const imagePath = saveImageToTemp(request.image);
-    if (imagePath) request.files.push(imagePath);
+function assertSessionIdle(agent, nativeSessionID, resumePicker = false) {
+  // A native picker can select any session and does not report its selection.
+  // Reserve this Agent while it is open so another window cannot write to it.
+  const active = [...running.values(), ...preparing.values()].some(entry => entry.request.agent === agent && (resumePicker || nativeSessionID && entry.request.nativeSessionID === nativeSessionID));
+  const terminal = listPtySessions().some(session => session.alive && session.agent === agent && (resumePicker || session.resumePicker || nativeSessionID && session.nativeSessionID === nativeSessionID));
+  if (active || terminal) throw new RequestError("该会话仍在执行、停止中或已在原生终端打开，请等待任务退出或先关闭原生终端");
+}
+
+// Map a working directory across the Windows/WSL boundary for the Agent's system.
+function agentCwd(cwd, location) {
+  if (location.platform === nativePlatform) return pathMatchesPlatform(cwd, location.platform) ? cwd : location.defaultCwd;
+  if (!cwd || cwd === config.defaultCwd || cwd === config.defaultWindowsCwd) return location.defaultCwd;
+  const mapped = location.platform === "wsl" ? toWSLPath(cwd) : toWindowsPath(cwd);
+  return pathMatchesPlatform(mapped, location.platform) ? mapped : location.defaultCwd;
+}
+
+async function prepareAndRun(request, response) {
+  if (running.has(request.requestID) || preparing.has(request.requestID)) throw new RequestError("重复的 requestID");
+  assertSessionIdle(request.agent, request.nativeSessionID);
+  const controller = new AbortController();
+  const entry = { request, controller };
+  preparing.set(request.requestID, entry);
+  const cancel = () => controller.abort(new Error("请求已取消或连接断开"));
+  response.once("close", cancel);
+  try {
+    startNDJSON(response);
+    writeEvent(response, envelope(request, "request.preparing", { message: "Runtime 已连接，正在准备 Agent 和模型" }));
+    await runAgent(request, response, controller.signal);
   }
-  const adapter = adapters[request.agent];
-  const invocation = adapter.buildInvocation(request);
+  catch (error) {
+    writeEvent(response, envelope(request, "error", { message: error.message }));
+    writeEvent(response, envelope(request, "request.completed", { code: 1, stderr: error.message }));
+    if (!response.writableEnded) response.end();
+  } finally {
+    if (preparing.get(request.requestID) === entry) preparing.delete(request.requestID);
+    response.removeListener("close", cancel);
+  }
+}
+
+async function runAgent(request, response, signal) {
+  const check = () => {
+    signal.throwIfAborted();
+    if (stopping || response.destroyed || response.writableEnded) throw new Error("请求已停止或连接断开");
+  };
+  check();
+  let abortResolve;
+  const location = await Promise.race([
+    launcher.resolve(request.agent, { prefer: request.nativeSessionID ? request.sessionPlatform : null }),
+    new Promise((_, reject) => {
+      abortResolve = () => reject(signal.reason);
+      signal.addEventListener("abort", abortResolve, { once: true });
+      if (signal.aborted) abortResolve();
+    }),
+  ]).finally(() => signal.removeEventListener("abort", abortResolve));
+  check();
+  request.cwd = agentCwd(request.cwd, location);
+  request.platform = location.platform;
+  if (request.agent === "opencode") {
+    const catalog = await modelCatalog(location, false, { signal, recent: !request.model, model: request.model });
+    check();
+    request.model = selectModel(catalog.models, request.model, catalog.recent, catalog.recentError);
+  }
+  check();
+  const ownedFiles = new Set();
+  const cleanup = () => {
+    for (const file of ownedFiles) { try { unlinkSync(file); } catch {} }
+    ownedFiles.clear();
+  };
+  if (request.image && request.agent !== "claude-code") {
+    const imagePath = saveImageToTemp(request.image);
+    if (!imagePath) throw new Error("Invalid screenshot data");
+    request.files.push(imagePath);
+    ownedFiles.add(imagePath);
+  }
+  const adapter = createAdapters({ [request.agent]: location.executable }, { [request.agent]: location.platform })[request.agent];
+  let invocation;
+  try {
+    // Claude receives image bytes from this process; other Agents open files themselves.
+    const mapPath = location.platform === nativePlatform ? null : location.platform === "wsl" ? toWSLPath : value => toWindowsPath(value);
+    const input = mapPath && request.agent !== "claude-code" ? { ...request, files: request.files.map(mapPath) } : request;
+    const built = adapter.buildInvocation(input);
+    if (location.platform === "wsl" && mapPath && request.agent === "claude-code") built.args = built.args.map(toWSLPath);
+    invocation = launcher.invocation(location, built, request.agent);
+  }
+  catch (error) { cleanup(); throw error; }
   if (invocation.nativeSessionID) {
     request.nativeSessionID = invocation.nativeSessionID;
   }
 
-  startNDJSON(response);
   writeEvent(response, envelope(request, "request.started", {
     cwd: request.cwd,
+    platform: request.platform,
     nativeSessionID: request.nativeSessionID,
   }));
+  if (request.agent === "opencode") {
+    writeEvent(response, envelope(request, "model.updated", { model: request.model }));
+  }
   if (request.nativeSessionID) {
     writeEvent(response, envelope(request, "session.updated", {
       nativeSessionID: request.nativeSessionID,
@@ -121,20 +229,39 @@ function runAgent(request, response) {
     });
   }
 
-  const child = spawn(invocation.command, invocation.args, {
+  let child;
+  try { child = spawn(invocation.command, invocation.args, {
     cwd: invocation.cwd,
     env: process.env,
     shell: false,
+    windowsHide: true,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments === true,
     detached: process.platform !== "win32",
     stdio: ["pipe", "pipe", "pipe"],
-  });
-  let stderrTail = "";
+  }); } catch (error) {
+    cleanup();
+    writeEvent(response, envelope(request, "error", { message: error.message }));
+    writeEvent(response, envelope(request, "request.completed", { code: null, stderr: error.message }));
+    response.end(); return;
+  }
+  let stderrTail = "", stdoutTail = "";
+  let inputWritten = false, agentResponded = false, submissionSent = false;
+  const confirmSubmission = () => {
+    if (inputWritten && agentResponded && !submissionSent) {
+      submissionSent = true;
+      writeEvent(response, envelope(request, "input.submitted"));
+    }
+  };
+  const extractVisibleText = createTextExtractor(request.agent);
+  preparing.delete(request.requestID);
   running.set(request.requestID, { child, request, response });
 
   const stdout = createInterface({ input: child.stdout });
   stdout.on("line", (line) => {
     if (!line) return;
     const raw = parseAgentLine(line);
+    if (!raw || raw.type === "process.output") stdoutTail = (stdoutTail + line + "\n").slice(-4000);
+    if (raw && raw.type !== "process.output") { agentResponded = true; confirmSubmission(); }
     const sessionID = extractSessionID(raw);
     if (sessionID && sessionID !== request.nativeSessionID) {
       request.nativeSessionID = sessionID;
@@ -148,14 +275,21 @@ function runAgent(request, response) {
         cwd: request.cwd,
       });
     }
-    const text = extractText(raw);
+    const text = extractVisibleText(raw);
     if (text) {
       writeEvent(response, envelope(request, "message.delta", {
         text,
         nativeSessionID: request.nativeSessionID,
       }));
     }
-    writeEvent(response, envelope(request, classifyRawEvent(raw), {
+    const model = extractModel(raw);
+    if (model && model !== request.detectedModel) {
+      request.detectedModel = model;
+      writeEvent(response, envelope(request, "model.updated", { model }));
+    }
+    const eventType = classifyRawEvent(raw);
+    writeEvent(response, envelope(request, eventType, {
+      ...(eventType === "error" ? { message: extractError(raw) + (request.agent === "opencode" ? ` · 模型：${request.model}。请检查该模型的服务状态、登录或额度；可在设置中刷新模型后重试。` : "") } : {}),
       raw,
       nativeSessionID: request.nativeSessionID,
     }));
@@ -174,22 +308,30 @@ function runAgent(request, response) {
   });
 
   child.on("close", (code, signal) => {
+    if (code === 0) { agentResponded = true; confirmSubmission(); }
     running.delete(request.requestID);
+    cleanup();
     writeEvent(response, envelope(request, "request.completed", {
       code,
       signal,
-      stderr: stderrTail.trim() || null,
+      stderr: stderrTail.trim() || (code !== 0 ? stdoutTail.trim() : "") || null,
       nativeSessionID: request.nativeSessionID,
     }));
     if (!response.writableEnded) response.end();
   });
 
-  if (invocation.stdin !== null && invocation.stdin !== undefined) {
-    child.stdin.write(invocation.stdin);
-    if (!invocation.keepStdinOpen) child.stdin.end();
-  } else {
-    if (!invocation.keepStdinOpen) child.stdin.end();
-  }
+  // Require both a written input pipe and native events (or successful exit).
+  // A spawned shell alone does not prove the CLI received the input.
+  child.stdin.on("error", (error) => {
+    writeEvent(response, envelope(request, "error", { message: `Agent input failed: ${error.message}` }));
+  });
+  child.on("spawn", () => {
+    const submitted = (error) => {
+      if (!error) { inputWritten = true; confirmSubmission(); }
+    };
+    if (invocation.keepStdinOpen) child.stdin.write(invocation.stdin || "", submitted);
+    else child.stdin.end(invocation.stdin ?? undefined, submitted);
+  });
 
   response.on("close", () => {
     if (running.has(request.requestID)) {
@@ -199,28 +341,39 @@ function runAgent(request, response) {
   });
 }
 
-function collectVersion(adapter) {
+async function collectVersion(adapter, agent) {
+  let location;
+  try { location = await launcher.resolve(agent); }
+  catch (error) { return { available: false, platform: agentPlatform(config, agent), executable: "", error: error.message }; }
   return new Promise((resolve) => {
-    const invocation = adapter.versionInvocation();
+    const invocation = launcher.invocation(location, { command: location.executable, args: ["--version"], cwd: location.defaultCwd }, agent);
     const child = spawn(invocation.command, invocation.args, {
+      cwd: invocation.cwd,
+      windowsHide: true,
       env: process.env,
       shell: false,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments === true,
       stdio: ["ignore", "pipe", "pipe"],
     });
-    let output = "";
+    let stdoutOutput = "";
+    let stderrOutput = "";
     const timeout = setTimeout(() => terminateProcess(child), 5000);
-    child.stdout.on("data", (chunk) => (output += chunk));
-    child.stderr.on("data", (chunk) => (output += chunk));
+    child.stdout.on("data", (chunk) => (stdoutOutput += chunk));
+    child.stderr.on("data", (chunk) => (stderrOutput += chunk));
     child.on("error", (error) => {
       clearTimeout(timeout);
-      resolve({ available: false, error: error.message });
+      resolve({ available: false, platform: location.platform, executable: location.executable, error: error.message });
     });
     child.on("close", (code) => {
       clearTimeout(timeout);
       resolve({
         available: code === 0,
-        version: output.trim().split(/\r?\n/).find(Boolean) || null,
-        executable: invocation.command,
+        error: code === 0 ? null : (stderrOutput.trim() || stdoutOutput.trim() || `版本检测失败（退出码 ${code}，可能超时）`),
+        version: stdoutOutput.trim().split(/\r?\n/).find(Boolean) || stderrOutput.trim().split(/\r?\n/).find(Boolean) || null,
+        executable: location.executable,
+        platform: location.platform,
+        defaultCwd: location.defaultCwd,
+        shell: config.shell,
       });
     });
   });
@@ -244,11 +397,49 @@ const server = http.createServer(async (request, response) => {
 
   try {
     const url = new URL(request.url, `http://${config.host}:${config.port}`);
+    if (request.method === "POST" && url.pathname === "/v1/runtime/stop") {
+      const body = await readJSON(request);
+      if (body.instanceID !== instanceID) { writeJSON(response, 409, { error: "Runtime 实例已改变，请重新检测" }); return; }
+      if (!body.force && (running.size || preparing.size || listPtySessions().some(s => s.alive))) { writeJSON(response, 409, { error: "有新任务正在运行，请重新确认停止" }); return; }
+      stopping = true;
+      writeJSON(response, 202, { status: "stopping" });
+      setImmediate(shutdown); return;
+    }
+    if (stopping) { writeJSON(response, 503, { error: "Runtime 正在停止" }); return; }
+    if (request.method === "GET" && url.pathname === "/v1/opencode/models") {
+      const controller = new AbortController();
+      const cancel = () => controller.abort(new Error("模型菜单已断开"));
+      response.once("close", cancel);
+      try {
+        const location = await launcher.resolve("opencode");
+        controller.signal.throwIfAborted();
+        const result = await modelCatalog(location, url.searchParams.get("refresh") === "1", { signal: controller.signal });
+        if (!response.destroyed) writeJSON(response, 200, result);
+      } finally { response.removeListener("close", cancel); }
+      return;
+    }
     if (request.method === "GET" && url.pathname === "/v1/health") {
+      let cwdExists = null;
+      const requestedCwd = url.searchParams.get("cwd");
+      if (requestedCwd) {
+        try { cwdExists = isAbsolute(requestedCwd) && statSync(requestedCwd).isDirectory(); }
+        catch { cwdExists = false; }
+      }
       writeJSON(response, 200, {
         status: "ok",
+        protocolVersion: 8,
+        runtimeVersion, buildID,
+        service: "zotagent", instanceID,
+        activeRequests: [...running.values(), ...preparing.values()].map(({ request }) => ({ agent: request.agent, requestID: request.requestID })),
+        activeTerminals: listPtySessions().filter(s => s.alive).map(s => ({ agent: s.agent, id: s.id })),
+        platform: nativePlatform,
+        wslDistro: process.env.WSL_DISTRO_NAME || null,
+        cwdExists,
         pid: process.pid,
-        runningRequests: running.size,
+        runningRequests: running.size + preparing.size,
+        preparingRequests: preparing.size,
+        defaultCwd: config.defaultCwd,
+        shell: config.shell,
       });
       return;
     }
@@ -256,47 +447,70 @@ const server = http.createServer(async (request, response) => {
       const entries = await Promise.all(
         Object.entries(adapters).map(async ([name, adapter]) => [
           name,
-          { ...(await collectVersion(adapter)), platform: adapter.platform },
+          {
+            ...(await collectVersion(adapter, name)),
+            // Installations on both systems, so each can be saved independently.
+            installations: await launcher.discoverAll(name),
+            shell: config.shell,
+            supportsImages: adapter.supportsImages,
+            supportsApproval: adapter.supportsApproval,
+          },
         ]),
       );
       writeJSON(response, 200, Object.fromEntries(entries));
       return;
     }
+    if (request.method === "GET" && url.pathname === "/v1/nodes") {
+      const nodes = {};
+      for (const platform of ["windows", "wsl"]) {
+        try { nodes[platform] = await launcher.resolveNode(platform); } catch { nodes[platform] = null; }
+      }
+      writeJSON(response, 200, nodes);
+      return;
+    }
     if (request.method === "POST" && url.pathname === "/v1/config/agents") {
       const body = await readJSON(request);
+      const next = { ...config, platforms: { ...config.platforms }, executables: { windows: { ...config.executables.windows }, wsl: { ...config.executables.wsl } } };
+      if (typeof body.wslDistro === "string" && body.wslDistro.trim()) next.wslDistro = body.wslDistro.trim();
       for (const name of ["opencode", "codex", "claude-code"]) {
-        const executable = body.executables?.[name];
-        if (executable !== undefined && executable !== null) {
-          const str = String(executable).trim();
-          if (str) {
-            if (!isAbsolute(str)) {
-              throw new Error(`${name} executable must be an absolute path`);
-            }
-            config.executables[name] = name === "claude-code" && !existsSync(str)
-              ? resolveClaudePath()
-              : str;
-          }
-        }
         const platform = body.platforms?.[name];
-        if (platform === "windows" || platform === "wsl") {
-          config.platforms[name] = platform;
+        if (["windows", "wsl", "auto"].includes(platform)) next.platforms[name] = platform;
+        // A flat { agent: path } body names paths on the Runtime's own system.
+        const flat = Object.hasOwn(body.executables || {}, name) ? { [nativePlatform]: { [name]: body.executables[name] } } : {};
+        for (const system of ["windows", "wsl"]) {
+          const source = flat[system] || body.executables?.[system];
+          if (!Object.hasOwn(source || {}, name)) continue;
+          const value = String(source[name] || "").trim();
+          // Empty or a bare command name resets to automatic detection.
+          if (!value || BARE_COMMANDS[name].includes(value)) { next.executables[system][name] = ""; continue; }
+          if (!pathMatchesPlatform(value, system)) throw new RequestError(`Invalid ${system} path for ${name}: ${value}`);
+          next.executables[system][name] = value;
         }
       }
-      adapters = createAdapters(config.executables, config.platforms);
+      const changed = JSON.stringify([config.executables, config.platforms, config.wslDistro]) !== JSON.stringify([next.executables, next.platforms, next.wslDistro]);
+      Object.assign(config, next);
+      if (changed) { launcher.clear(); modelCatalog.clear(); }
+      adapters = platformAdapters();
       writeJSON(response, 200, {
         status: "updated",
         executables: config.executables,
         platforms: config.platforms,
+        shell: config.shell,
       });
       return;
     }
     if (request.method === "POST" && url.pathname === "/v1/run") {
-      runAgent(validateRunRequest(await readJSON(request)), response);
+      await prepareAndRun(validateRunRequest(await readJSON(request)), response);
       return;
     }
     const cancelMatch = url.pathname.match(/^\/v1\/requests\/([^/]+)\/cancel$/);
     if (request.method === "POST" && cancelMatch) {
       const requestID = decodeURIComponent(cancelMatch[1]);
+      const pending = preparing.get(requestID);
+      if (pending) {
+        pending.controller.abort(new Error("用户已中断模型准备"));
+        writeJSON(response, 202, { status: "cancelling", requestID }); return;
+      }
       const active = running.get(requestID);
       if (!active) {
         writeJSON(response, 404, { error: "request not found" });
@@ -312,6 +526,10 @@ const server = http.createServer(async (request, response) => {
       const active = running.get(requestID);
       if (!active) {
         writeJSON(response, 404, { error: "request not found" });
+        return;
+      }
+      if (!active.child.stdin.writable) {
+        writeJSON(response, 409, { error: "stdin is closed, approval not supported in this mode" });
         return;
       }
       const body = await readJSON(request);
@@ -349,15 +567,29 @@ const server = http.createServer(async (request, response) => {
         writeJSON(response, 400, { error: `Unsupported agent: ${agent}` });
         return;
       }
-      const adapter = adapters[agent];
-      const rawCwd = String(body.cwd || "");
-      const cwd = adapter.resolveCwd(
-        rawCwd || (adapter.platform === "windows" ? config.defaultWindowsCwd : config.defaultCwd),
-        config.defaultWindowsCwd,
-      );
-      const interactive = adapter.interactiveArgs(body.sessionID || null, cwd);
-      const session = createPtySession(adapter.executable, interactive.args, interactive.cwd, {}, { cols: body.cols, rows: body.rows });
-      writeJSON(response, 200, { ptyID: session.id, agent, cwd });
+      let disconnected = false;
+      const onClose = () => { disconnected = true; };
+      response.once("close", onClose);
+      let location;
+      const preferred = body.sessionID && ["windows", "wsl"].includes(body.platform) ? body.platform : null;
+      try { location = await launcher.resolve(agent, { prefer: preferred }); }
+      finally { response.removeListener("close", onClose); }
+      // WSL discovery can outlast the client's wait; never start a terminal nobody can close.
+      if (disconnected || response.destroyed) return;
+      const adapter = createAdapters({ [agent]: location.executable }, { [agent]: location.platform })[agent];
+      const cwd = agentCwd(String(body.cwd || ""), location);
+      const nativeSessionID = body.sessionID ? String(body.sessionID) : null;
+      const interactive = adapter.interactiveArgs(nativeSessionID, cwd);
+      assertSessionIdle(agent, nativeSessionID, interactive.resumePicker);
+      const ptyInvocation = launcher.invocation(location, interactive, agent);
+      if (stopping) throw new RequestError("Runtime 正在停止", 503);
+      const session = createPtySession(ptyInvocation.command, ptyShellArgs(ptyInvocation), ptyInvocation.cwd, ptyInvocation.env || {}, { cols: body.cols, rows: body.rows, claimTimeoutMs: PTY_CLAIM_TIMEOUT_MS });
+      const resumedID = agent === "opencode" || interactive.resumePicker ? null : nativeSessionID;
+      session.agent = agent; session.nativeSessionID = resumedID;
+      session.resumePicker = interactive.resumePicker === true;
+      writeJSON(response, 200, { ptyID: session.id, agent, cwd, nativeSessionID: resumedID,
+        resumeMode: session.resumePicker ? "picker" : "direct", previousNativeSessionID: nativeSessionID,
+        platform: location.platform, wslDistro: location.distro || (location.platform === "wsl" ? process.env.WSL_DISTRO_NAME || null : null), executable: location.executable });
       return;
     }
     if (request.method === "POST" && url.pathname === "/v1/pty/write") {
@@ -405,7 +637,12 @@ const server = http.createServer(async (request, response) => {
     }
     writeJSON(response, 404, { error: "not found" });
   } catch (error) {
-    writeJSON(response, 400, { error: error.message });
+    if (response.headersSent) { response.end(); return; }
+    // Agent discovery and launch errors are configuration problems the user can
+    // fix (400); file-system failures in the Runtime itself are internal (500).
+    const status = error instanceof RequestError ? error.status : error.syscall && error.syscall !== "spawn" && !String(error.syscall).startsWith("spawn ") ? 500 : 400;
+    if (status >= 500) process.stderr.write(`[ZotAgent Runtime] ${request.method} ${request.url}: ${error.stack || error.message}\n`);
+    writeJSON(response, status, { error: error.message });
   }
 });
 
@@ -416,7 +653,7 @@ server.on("error", (error) => {
 
 server.listen(config.port, config.host, () => {
   process.stderr.write(
-    `[ZotAgent Runtime] listening on http://${config.host}:${config.port}\n`,
+    `[ZotAgent Runtime] listening on http://${config.host}:${server.address().port}\n`,
   );
   if (config.generatedToken) {
     process.stderr.write(`[ZotAgent Runtime] generated token: ${config.token}\n`);
@@ -424,7 +661,12 @@ server.listen(config.port, config.host, () => {
 });
 
 function shutdown() {
+  stopping = true;
+  setTimeout(() => { server.closeAllConnections(); process.exit(0); }, 2500).unref();
+  for (const { controller } of preparing.values()) controller.abort(new Error("Runtime 正在停止"));
+  modelCatalog.clear();
   for (const { child } of running.values()) terminateProcess(child);
+  for (const session of listPtySessions()) closePtySession(session.id);
   server.close(() => process.exit(0));
 }
 

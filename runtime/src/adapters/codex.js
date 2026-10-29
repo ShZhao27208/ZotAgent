@@ -12,12 +12,11 @@ export class CodexAdapter extends AgentAdapter {
         "exec",
         "--json",
         "--skip-git-repo-check",
-        "--cd",
-        request.cwd,
       ];
       if (request.model) args.push("--model", request.model);
       args.push("-");
     }
+    for (const file of request.files || []) args.push("--image", file);
     return {
       command: this.executable,
       args,
@@ -27,9 +26,9 @@ export class CodexAdapter extends AgentAdapter {
     };
   }
 
+  get supportsImages() { return true; }
+
   interactiveArgs(sessionID, cwd) {
-    const args = ["--cd", cwd];
-    if (sessionID) args.push("resume", sessionID);
-    return { args, cwd };
+    return { args: ["resume", "--all", "--include-non-interactive"], cwd, resumePicker: true };
   }
 }
