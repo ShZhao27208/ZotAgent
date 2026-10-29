@@ -1,5 +1,5 @@
 <div align="center">
-<img src="plugin/content/icon.svg" width="120" height="120" alt="ZotAgent"/>
+<img src="docs/logo.gif" width="160" height="160" alt="瞾 — Shuo Zhao" style="border-radius:50%;"/>
 
 # ZotAgent
 
@@ -383,3 +383,12 @@ ZotAgent/
 Licensed under the [Apache License 2.0](LICENSE). Third-party dependencies retain their own licenses.
 
 本项目采用 [Apache License 2.0](LICENSE) 开源协议。第三方依赖仍适用各自的许可证。
+
+
+### Automatic plugin updates / 插件自动更新
+
+ZotAgent checks the [update feed](https://raw.githubusercontent.com/ShZhao27208/ZotAgent/main/update.json) through Zotero's plugin updater. Enable automatic add-on updates in Zotero. Only published stable releases with an uploaded XPI enter this feed; GitHub must be reachable. Installing 0.7.2 already configures the feed URL, so no reinstall is needed to enable future updates.
+
+在 Zotero 中开启插件自动更新后，可通过更新清单检测后续正式版；需要能够访问 GitHub。0.7.2 已配置更新地址，无需重新安装来启用未来更新。同版本不会重复升级，预览版不会推送到正式更新渠道。
+
+发布维护：先创建正式 GitHub Release 并上传 XPI，再由 `Publish Zotero update feed` 工作流更新 `main/update.json`。若创建 Release 时附件尚未上传完，上传完成后手动运行该工作流并填写版本标签；也可运行 `npm run update-manifest -- vX.Y.Z` 后提交清单。生成器确认正式版 XPI 已上传，从版本标签读取兼容信息；不下载安装包、不计算哈希值。

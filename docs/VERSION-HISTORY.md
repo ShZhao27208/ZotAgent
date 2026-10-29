@@ -2,9 +2,9 @@
 
 > 本文件记录本地可见的 Git 历史（含推送前待发布提交），不代表 GitHub 每次 push 的事件日志。推送前 hook 自动更新本地历史；实际推送成功后在文末独立记录，可随下一批修改提交。
 
-- 历史截至：2026-10-23T13:00:24+08:00
+- 历史截至：2026-10-29T22:13:26+08:00
 - 项目：`ShZhao27208/ZotAgent`
-- 可见提交：71 个（按 Git 提交时间升序）
+- 可见提交：72 个（按 Git 提交时间升序）
 - 时间：ISO 8601，带时区
 
 ## 远端分支与标签
@@ -26,6 +26,7 @@
 | `v0.6.1` | `3d9fbeb2e862` | 2026-10-09T20:53:14+08:00 | chore: release v0.6.1 |
 | `v0.6.2` | `bdbaed37ed47` | 2026-10-11T23:59:17+08:00 | chore: release v0.6.2 with compact framed archive layout |
 | `v0.7.0` | `9443c7d349b3` | 2026-10-23T13:00:32+08:00 | ZotAgent 0.7.0 |
+| `v0.7.2` | `d84075a1e6c2` | 2026-10-29T22:13:26+08:00 | chore: release v0.7.2 with answer actions and Apache 2.0 |
 
 ## 正式版本
 
@@ -60,6 +61,7 @@
 | `0.6.1` | 2026-10-09T20:53:14+08:00 | `3d9fbeb` | chore: release v0.6.1 |
 | `0.6.2` | 2026-10-11T23:59:17+08:00 | `bdbaed3` | chore: release v0.6.2 with compact framed archive layout |
 | `0.7.0` | 2026-10-23T13:00:32+08:00 | `9443c7d349b3` | ZotAgent 0.7.0 |
+| `0.7.2` | 2026-10-29T22:13:26+08:00 | `d84075a` | chore: release v0.7.2 with answer actions and Apache 2.0 |
 
 ## 本地可见提交
 
@@ -138,6 +140,7 @@
 | 69 | 2026-10-11T23:59:17+08:00 | `0.6.2` | `bdbaed3` | chore: release v0.6.2 with compact framed archive layout |
 | 70 | 2026-10-23T13:00:24+08:00 | `0.7.0` | `ec0e703` | feat: run Windows and WSL agents side by side and use ruled archive records |
 | 71 | 2026-10-23T13:00:24+08:00 | `0.7.0` | `b16f52f` | test: cover per-system agent paths, cmd escaping and ruled archive records |
+| 72 | 2026-10-29T22:13:26+08:00 | `0.7.2` | `d84075a` | chore: release v0.7.2 with answer actions and Apache 2.0 |
 
 ## 维护规则
 
@@ -274,3 +277,15 @@
 - 安装包：`dist/zotagent-0.7.0.xpi`，14100875 字节；SHA-256 `4c07f0c25ef242b3f9e1e6e4538696d23b4190a635ae3150b4d05b2594b9a23e`。GitHub 上传大小及 digest 已核对。
 - GitHub 预览版及安装包：https://github.com/ShZhao27208/ZotAgent/releases/tag/v0.7.0。
 - 本条为推送后的本地记录，留待下一完整批次提交，不为记录自身重复推送。
+
+### 0.7.2 — 正式发布：回答操作与 Apache 2.0
+
+- 发布成功并核对后的记录时间：2026-10-29T22:15:30+08:00；Git committer 时间：2026-10-29T22:13:26+08:00。
+- 提交：`d84075a1e6c288f09c63cc13f511762c9e42e082`；远端 `origin`，分支 `fix/auto-detect-runtime-and-cli-paths` 与标签 `v0.7.2` 已核对一致。
+- GitHub 正式版：https://github.com/ShZhao27208/ZotAgent/releases/tag/v0.7.2；非草稿、非预览版，已核对为 Latest。
+- 内容：恢复底部按钮并保留逐条回答右键菜单；子笔记保存对应问题与回答；补充新版双语 README，添加 Apache License 2.0。
+- 清理：删除重复 README、Windows Zone.Identifier 及 runtime/src/.omc 嵌套工具缓存。保留并忽略本地测试数据库、依赖、构建产物和工作状态；新增环境文件、覆盖率和临时文件忽略规则。
+- 构建修复：过滤源码目录的隐藏文件及临时文件，校验安装包无本地状态文件，校验项目与依赖许可证。
+- 验证：190 项测试，189 通过，1 项 Windows 专用测试跳过；构建、安装包一致性、许可证、diff 检查通过。发布源码凭据模式扫描无匹配（非完整安全审计）。Zotero 实际 UI 尚未实测。
+- 安装包：`dist/zotagent-0.7.2.xpi`，14110716 字节；SHA-256 `3e0400485ed8fdf16b6fb3b2f6131b54431abd25571ae8d304479be6ad088247`，GitHub 资产 digest 已核对。
+- 本条为推送后本地记录，不为记录自身重复提交推送。

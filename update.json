@@ -1,0 +1,18 @@
+{
+  "addons": {
+    "zotagent@shzhao.local": {
+      "updates": [
+        {
+          "version": "0.7.2",
+          "update_link": "https://github.com/ShZhao27208/ZotAgent/releases/download/v0.7.2/zotagent-0.7.2.xpi",
+          "applications": {
+            "zotero": {
+              "strict_min_version": "6.999",
+              "strict_max_version": "10.*"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
